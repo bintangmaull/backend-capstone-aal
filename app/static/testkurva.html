@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Visualisasi Kurva Kerentanan</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    .chart-container { margin-bottom: 40px; }
+    .chart-container h3 { margin-bottom: 10px; }
+  </style>
+</head>
+<body>
+  <h2>Visualisasi Kurva Kerentanan</h2>
+
+  <div id="charts">
+    <div class="chart-container">
+      <h3>Gempa</h3>
+      <canvas id="chart-gempa" width="600" height="300"></canvas>
+    </div>
+    <div class="chart-container">
+      <h3>Banjir</h3>
+      <canvas id="chart-banjir" width="600" height="300"></canvas>
+    </div>
+    <div class="chart-container">
+      <h3>Gunung Berapi</h3>
+      <canvas id="chart-gunungberapi" width="600" height="300"></canvas>
+    </div>
+    <div class="chart-container">
+      <h3>Longsor</h3>
+      <canvas id="chart-longsor" width="600" height="300"></canvas>
+    </div>
+  </div>
+
+  <script>
+    // warna untuk tiap tipe_kurva (sesuai key di backend)
+    const taxonomyColors = {
+      "lightwood": "#ffc107",
+      "mur":       "#fd7e14",
+      "mcf":       "#dc3545",
+      "cr":        "#6f42c1",
+      "1":         "#007bff",
+      "2":         "#28a745"
+    };
+
+    // list bencana dan ID canvas-nya
+    const disasters = [
+      { key: 'gempa',         canvasId: 'chart-gempa' },
+      { key: 'banjir',        canvasId: 'chart-banjir' },
+      { key: 'gunungberapi',  canvasId: 'chart-gunungberapi' },
+      { key: 'longsor',       canvasId: 'chart-longsor' }
+    ];
+
+    // fetch data sekali saja
+    fetch('/api/disaster-curves')
+      .then(res => {
+        if (!res.ok) throw new Error(res.status);
+        return res.json();
+      })
+      .then(rawData => {
+        disasters.forEach(({ key, canvasId }) => {
+          // ambil grouping dari backend
+          const grouped = rawData[key];
+
+          // untuk banjir pakai apa saja yang ada, lainnya paksa empat taxonomy
+          const taxonomyList = (key === 'banjir')
+            ? Object.keys(grouped)
+            : ['lightwood', 'mur', 'mcf', 'cr'];
+
+          // kumpulkan semua nilai x untuk menentukan rentang
+          const allX = taxonomyList.reduce((arr, tax) => {
+            const pts = grouped[tax] || { x: [], y: [] };
+            return arr.concat(pts.x);
+          }, []);
+          const maxX = allX.length ? Math.max(...allX) : 0;
+
+          // inisialisasi chart dengan rentang x dari 0 sampai maxX
+          const ctx = document.getElementById(canvasId).getContext('2d');
+          const chart = new Chart(ctx, {
+            type: 'line',
+            data: { datasets: [] },
+            options: {
+              responsive: true,
+              elements: {
+                line: { cubicInterpolationMode: 'monotone', tension: 0.4 }
+              },
+              plugins: {
+                legend: { display: true, position: 'top' }
+              },
+              scales: {
+                x: {
+                  type: 'linear',
+                  title: { display: true, text: 'x' },
+                  min: 0,
+                  max: maxX
+                },
+                y: {
+                  min: 0,
+                  max: 1,
+                  title: { display: true, text: 'y' }
+                }
+              }
+            }
+          });
+
+          // siapkan dataset untuk tiap tipe_kurva
+          const datasets = taxonomyList.map(tax => {
+            const pts = grouped[tax] || { x: [], y: [] };
+            const dataPoints = pts.x.map((x,i) => ({ x, y: pts.y[i] }));
+            const label = (key === 'banjir') ? `Curve ${tax}` : tax;
+            return {
+              label,
+              data: dataPoints,
+              borderColor: taxonomyColors[tax] || 'gray',
+              fill: false
+            };
+          });
+
+          chart.data.datasets = datasets;
+          chart.update();
+        });
+      })
+      .catch(err => {
+        console.error('Gagal mengambil data:', err);
+        alert('Gagal mengambil data dari backend');
+      });
+  </script>
+</body>
+</html>

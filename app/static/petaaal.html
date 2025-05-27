@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Peta Choropleth AAL per Provinsi</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <!-- Leaflet CSS -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  />
+
+  <style>
+    body { margin:0; }
+    #filter-container {
+      position:absolute; top:10px; left:10px; z-index:1000;
+      background:white; padding:10px; border-radius:6px;
+      box-shadow:0 2px 6px rgba(0,0,0,0.2);
+      display:flex; gap:8px; align-items:center;
+      font-family: sans-serif;
+    }
+    #filter-container label {
+      font-size:14px; font-weight:bold;
+    }
+    #filter-container select {
+      padding:4px 6px; border-radius:4px; border:1px solid #ccc;
+      font-size:14px;
+    }
+    #map { height:100vh; width:100%; }
+    .info.legend {
+      line-height:18px;
+      color:#555;
+      background:white;
+      padding:6px 8px;
+      border-radius:4px;
+      box-shadow:0 1px 4px rgba(0,0,0,0.2);
+      font-size:12px;
+      font-family: sans-serif;
+    }
+    .info.legend i {
+      width:18px; height:18px;
+      float:left; margin-right:8px;
+      opacity:0.8;
+    }
+    .province-label {
+      background: rgba(255,255,255,0.9);
+      border:none;
+      box-shadow:0 0 4px rgba(0,0,0,0.3);
+      padding:2px 4px;
+      font-size:12px;
+      font-weight:bold;
+      pointer-events:none;
+      white-space: nowrap;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="filter-container">
+    <label for="hazardSelect">Bencana:</label>
+    <select id="hazardSelect">
+      <option value="">— Pilih —</option>
+      <option value="gempa">Gempa</option>
+      <option value="banjir">Banjir</option>
+      <option value="longsor">Longsor</option>
+      <option value="gunungberapi">Gunung Berapi</option>
+    </select>
+
+    <label for="periodSelect">Return Period:</label>
+    <select id="periodSelect" disabled>
+      <option value="">— Pilih —</option>
+    </select>
+
+    <label for="modelSelect">Model:</label>
+    <select id="modelSelect" disabled>
+      <option value="">— Pilih —</option>
+      <option value="bmn">BMN</option>
+      <option value="fs">FS</option>
+      <option value="fd">FD</option>
+      <option value="total">Total</option>
+    </select>
+  </div>
+
+  <div id="map"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    function formatRupiah(num) {
+      return 'Rp ' + num.toLocaleString('id-ID',{minimumFractionDigits:0});
+    }
+
+    const colors = ['#d73027','#fc8d59','#fee08b','#d9ef8b','#1a9850'];
+    const periodMap = {
+      gempa:       [500,250,100],
+      banjir:      [100,50,25],
+      longsor:     [5,2],
+      gunungberapi:[250,100,50]
+    };
+
+    const map = L.map('map',{ zoomControl:false }).setView([-2.5,118],5);
+    const osm    = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{ attribution:'&copy; OSM' }).addTo(map);
+    const gmSt   = L.tileLayer('https://{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',{ subdomains:['mt0','mt1','mt2','mt3'] });
+    const gmSat  = L.tileLayer('https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',{ subdomains:['mt0','mt1','mt2','mt3'] });
+    L.control.zoom({ position:'topright' }).addTo(map);
+    L.control.layers({ OSM:osm,'Google St':gmSt,'Google Sat':gmSat },{}, { position:'bottomleft' }).addTo(map);
+
+    const hazardSelect = document.getElementById('hazardSelect');
+    const periodSelect = document.getElementById('periodSelect');
+    const modelSelect  = document.getElementById('modelSelect');
+
+    let geojsonData, choropleth, legend, breaks, minVal, maxVal;
+    let labelLayer = L.layerGroup();
+
+    fetch('/api/aal-provinsi')
+      .then(r => r.ok ? r.json() : Promise.reject(r.status))
+      .then(gj => geojsonData = gj)
+      .catch(e => console.error(e));
+
+    hazardSelect.addEventListener('change', () => {
+      const h = hazardSelect.value;
+      periodSelect.innerHTML = '<option value="">— Pilih —</option>';
+      modelSelect.value = '';
+      modelSelect.disabled = !h;
+      periodSelect.disabled = !h;
+      if (!h) return;
+      periodMap[h].forEach(p => {
+        const o = document.createElement('option'); o.value = p; o.text = p;
+        periodSelect.appendChild(o);
+      });
+    });
+
+    periodSelect.addEventListener('change', () => {
+      modelSelect.disabled = !periodSelect.value;
+    });
+
+    [hazardSelect, periodSelect, modelSelect].forEach(el => {
+      el.addEventListener('change', () => {
+        if (!hazardSelect.value || !periodSelect.value || !modelSelect.value) return;
+        updateChoropleth();
+      });
+    });
+
+    function updateChoropleth() {
+      const h = hazardSelect.value;
+      const p = periodSelect.value;
+      const m = modelSelect.value;
+      const suffix = (m === 'total' ? 'total' : m);
+      const metric = `aal_${h}_${p}_${suffix}`;
+
+      const vals = geojsonData.features.map(f => {
+        const raw = f.properties[metric];
+        return (typeof raw === 'number' && !isNaN(raw)) ? raw : 0;
+      });
+      minVal = Math.min(...vals); maxVal = Math.max(...vals);
+      breaks = [
+        minVal + (maxVal-minVal)*0.2,
+        minVal + (maxVal-minVal)*0.4,
+        minVal + (maxVal-minVal)*0.6,
+        minVal + (maxVal-minVal)*0.8
+      ];
+
+      if (choropleth) map.removeLayer(choropleth);
+      if (legend)     map.removeControl(legend);
+      labelLayer.clearLayers();
+
+      function style(feature) {
+        const raw = feature.properties[metric];
+        const v   = (typeof raw === 'number' && !isNaN(raw)) ? raw : 0;
+        let c = colors[0];
+        for (let i=breaks.length-1; i>=0; i--) {
+          if (v >= breaks[i]) { c = colors[i+1]; break; }
+        }
+        return { fillColor:c, weight:1, color:'#fff', fillOpacity:0.7 };
+      }
+
+      choropleth = L.geoJSON(geojsonData, {
+        style: style,
+        onEachFeature: (feature, layer) => {
+          const raw = feature.properties[metric];
+          const v   = (typeof raw === 'number' && !isNaN(raw)) ? raw : 0;
+
+          layer.bindTooltip(
+            `<div class="province-label">${feature.properties.provinsi}<br>${formatRupiah(v)}</div>`,
+            { sticky:true, direction:'top', offset:[0,-15] }
+          );
+
+          layer.on({
+            mouseover: e => { e.target.setStyle({ weight:3, color:'#333', fillOpacity:0.9 }); e.target.bringToFront(); },
+            mouseout: e => choropleth.resetStyle(e.target)
+          });
+
+          const ctr = layer.getBounds().getCenter();
+          const lbl = L.marker(ctr, { icon: L.divIcon({ className:'province-label', html:feature.properties.provinsi }) });
+          labelLayer.addLayer(lbl);
+        }
+      }).addTo(map);
+
+      legend = L.control({ position:'bottomright' });
+      legend.onAdd = () => {
+        const div = L.DomUtil.create('div','info legend');
+        const grades = [minVal, ...breaks, maxVal];
+        let html = '';
+        for (let i=0; i<grades.length-1; i++) {
+          html += `<i style="background:${colors[i]}"></i> ` +
+                  `${formatRupiah(Math.round(grades[i]))} &ndash; ${formatRupiah(Math.round(grades[i+1]))}<br>`;
+        }
+        div.innerHTML = html;
+        return div;
+      };
+      legend.addTo(map);
+
+      function toggleLabels() {
+        map.getZoom() >= 6 ? map.addLayer(labelLayer) : map.removeLayer(labelLayer);
+      }
+      map.on('zoomend', toggleLabels);
+      toggleLabels();
+
+      map.fitBounds(choropleth.getBounds());
+    }
+  </script>
+</body>
+</html>

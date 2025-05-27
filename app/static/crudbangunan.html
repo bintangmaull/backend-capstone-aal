@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Manajemen Bangunan</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- Leaflet CSS & Geocoder CSS -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  />
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.css"
+  />
+  <style>
+    body { margin:0; padding:0; font-family: Arial, sans-serif; background: #FFE5E5; }
+    .container {
+      max-width: 1000px; margin: 20px auto;
+      background: #FFF0F0; padding: 20px;
+      border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+    }
+    .header { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+    .filter { display: flex; flex-direction: column; }
+    .filter label { font-weight: bold; font-size: 14px; margin-bottom: 4px; }
+    .filter select, .filter input[type="text"], .filter input[type="file"] {
+      padding: 6px; border:1px solid #ccc; border-radius:4px; font-size:14px;
+    }
+    .filter-type { display: flex; align-items: center; gap: 8px; margin-top: 20px; }
+    .filter-type label { font-size: 14px; cursor: pointer; }
+    .spacer { flex:1 }
+    .btn {
+      background:#A50021; color:white; border:none;
+      padding:8px 12px; border-radius:4px; cursor:pointer;
+      font-size:14px;
+    }
+    table {
+      width:100%; border-collapse: collapse; margin-top:16px;
+      background: white; border-radius: 4px; overflow: hidden;
+    }
+    thead { background:#A50021; color:white; }
+    th, td {
+      padding:8px; text-align:left; border-bottom:1px solid #ddd;
+      font-size:14px;
+    }
+    tbody tr:hover { background:#ffecec; }
+    .actions button {
+      background:none; border:none; cursor:pointer; margin-right:8px;
+      font-size:16px; color:#A50021;
+    }
+    #recalcBtn { margin-top:16px; float:right; }
+    .modal-backdrop {
+      position: fixed; top:0; left:0; right:0; bottom:0;
+      background: rgba(0,0,0,0.5);
+      display: none; justify-content:center; align-items:center; z-index:1000;
+    }
+    .modal {
+      background:white; padding:20px; border-radius:8px; width:400px;
+      box-shadow:0 2px 8px rgba(0,0,0,0.2);
+      max-height: 90vh; overflow-y: auto;
+    }
+    .modal h2 { margin-top:0; }
+    .modal form { display:flex; flex-direction:column; gap:8px; }
+    .modal form input, .modal form select {
+      padding:6px; border:1px solid #ccc; border-radius:4px; font-size:14px;
+    }
+    .btn-group { margin-top:12px; text-align:right; display:flex; gap:8px; }
+    /* Map picker & suggestions */
+    #pickerMap { height:200px; margin-top:8px; border:1px solid #ccc; }
+    #mapSearch { padding:6px; border:1px solid #ccc; border-radius:4px; font-size:14px; }
+    #suggestions {
+      list-style:none; padding:0; margin:4px 0 0 0;
+      max-height:100px; overflow-y:auto; border:1px solid #ccc; border-radius:4px;
+      background:white;
+    }
+    #suggestions li {
+      padding:4px; cursor:pointer;
+    }
+    #suggestions li:hover {
+      background:#eee;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <div class="header">
+      <!-- CSV Upload -->
+      <div class="filter">
+        <label for="csvInput">Upload CSV</label>
+        <input type="file" id="csvInput" accept=".csv">
+      </div>
+      <button id="uploadCsvBtn" class="btn" disabled>Upload CSV</button>
+      <!-- End CSV Upload -->
+
+      <div class="filter">
+        <label for="provFilter">Provinsi</label>
+        <select id="provFilter">
+          <option value="">— Pilih Provinsi —</option>
+        </select>
+      </div>
+      <div class="filter">
+        <label for="kotaFilter">Kota/Kabupaten</label>
+        <select id="kotaFilter" disabled>
+          <option value="">— Pilih Kota —</option>
+        </select>
+      </div>
+      <div class="filter">
+        <label for="searchInput">Cari Nama</label>
+        <input id="searchInput" type="text" placeholder="ketik untuk cari..." disabled>
+      </div>
+      <div class="spacer"></div>
+      <button id="addBtn" class="btn" disabled>ADD +</button>
+    </div>
+
+    <div class="filter-type">
+      <label><input type="checkbox" id="bmnFilter" value="BMN" checked> BMN</label>
+      <label><input type="checkbox" id="fsFilter"  value="FS"  checked> FS</label>
+      <label><input type="checkbox" id="fdFilter"  value="FD"  checked> FD</label>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Nama Gedung</th>
+          <th>Alamat</th>
+          <th>Kota</th>
+          <th>Provinsi</th>
+          <th>Lon</th>
+          <th>Lat</th>
+          <th>Taxonomy</th>
+          <th>Luas (m²)</th>
+          <th>Aksi</th>
+        </tr>
+      </thead>
+      <tbody id="tableBody"></tbody>
+    </table>
+
+    <button id="recalcBtn" class="btn" disabled>Kalkulasi Ulang</button>
+  </div>
+
+  <div id="backdrop" class="modal-backdrop">
+    <div class="modal">
+      <h2 id="modalTitle">Tambah Bangunan</h2>
+      <form id="buildingForm">
+        <input type="hidden" id="id_bangunan">
+
+        <label>Nama Gedung:</label>
+        <input type="text" id="nama_gedung" required>
+
+        <label>Alamat:</label>
+        <input type="text" id="alamat" required>
+
+        <label>Provinsi:</label>
+        <select id="provinsi" required>
+          <option value="">— Pilih Provinsi —</option>
+        </select>
+
+        <label>Kota:</label>
+        <select id="kota" required disabled>
+          <option value="">— Pilih Kota —</option>
+        </select>
+
+        <label>Longitude:</label>
+        <input type="number" id="lon" step="any" required>
+
+        <label>Latitude:</label>
+        <input type="number" id="lat" step="any" required>
+
+        <label>Search Lokasi:</label>
+        <input type="text" id="mapSearch" placeholder="Cari lokasi..." />
+        <ul id="suggestions"></ul>
+
+        <div id="pickerMap"></div>
+
+        <!-- Kode Bangunan -->
+        <label>Kode Bangunan:</label>
+        <select id="kodeBangunan" required>
+          <option value="">— Pilih Kode —</option>
+          <option value="BMN">BMN</option>
+          <option value="FS">FS</option>
+          <option value="FD">FD</option>
+        </select>
+
+        <!-- Taxonomy -->
+        <label>Taxonomy:</label>
+        <select id="taxonomy" required>
+          <option value="">— Pilih Taxonomy —</option>
+          <option value="CR">CR</option>
+          <option value="MCF">MCF</option>
+          <option value="MUR">MUR</option>
+          <option value="LightWood">Light Wood</option>
+        </select>
+
+        <label>Luas (m²):</label>
+        <input type="number" id="luas" step="any" required>
+
+        <div class="btn-group">
+          <button type="button" id="cancelBtn" class="btn">Batal</button>
+          <button type="submit" class="btn">Simpan</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Dependencies: Leaflet & Geocoder JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js"></script>
+
+  <script>
+    const apiBase   = '/api/bangunan';
+    const provApi   = '/api/bangunan/provinsi';
+    const kotaApi   = '/api/bangunan/kota';
+
+    const provFilter  = document.getElementById('provFilter');
+    const kotaFilter  = document.getElementById('kotaFilter');
+    const searchInput = document.getElementById('searchInput');
+    const bmnFilter   = document.getElementById('bmnFilter');
+    const fsFilter    = document.getElementById('fsFilter');
+    const fdFilter    = document.getElementById('fdFilter');
+    const addBtn      = document.getElementById('addBtn');
+    const recalcBtn   = document.getElementById('recalcBtn');
+    const tableBody   = document.getElementById('tableBody');
+    const backdrop    = document.getElementById('backdrop');
+    const modalTitle  = document.getElementById('modalTitle');
+    const form        = document.getElementById('buildingForm');
+    const fields      = [
+      'id_bangunan','nama_gedung','alamat',
+      'provinsi','kota','lon','lat','taxonomy','luas'
+    ];
+    let modalMode = 'add';
+
+    // CSV upload
+    const csvInput     = document.getElementById('csvInput');
+    const uploadCsvBtn = document.getElementById('uploadCsvBtn');
+
+    csvInput.addEventListener('change', () => {
+      uploadCsvBtn.disabled = !csvInput.files.length;
+    });
+
+    uploadCsvBtn.addEventListener('click', async () => {
+      if (!csvInput.files.length) return;
+      uploadCsvBtn.disabled = true;
+      const formData = new FormData();
+      formData.append('file', csvInput.files[0]);
+
+      try {
+        const res = await fetch(`${apiBase}/upload`, {
+          method: 'POST',
+          body: formData
+        });
+        const result = await res.json();
+        if (!res.ok) throw new Error(result.error || 'Upload gagal');
+        alert(`Upload CSV berhasil: ${result.created} record dibuat`);
+        fetchAndRender();
+      } catch (err) {
+        alert(`Upload CSV gagal: ${err.message}`);
+      } finally {
+        uploadCsvBtn.disabled = false;
+        csvInput.value = null;
+      }
+    });
+
+    // helper load provinsi list
+    function loadProvinsiOptions(sel){
+      sel.innerHTML = '<option value="">— Pilih Provinsi —</option>';
+      fetch(provApi).then(r=>r.json()).then(list=>{
+        list.forEach(p=>{
+          const o=document.createElement('option');
+          o.value=p; o.textContent=p;
+          sel.appendChild(o);
+        });
+      });
+    }
+
+    // filter utama
+    loadProvinsiOptions(provFilter);
+    provFilter.onchange = ()=> {
+      const prov = provFilter.value;
+      kotaFilter.innerHTML = '<option value="">— Pilih Kota —</option>';
+      kotaFilter.disabled = !prov;
+      searchInput.value=''; searchInput.disabled=true;
+      addBtn.disabled=true; recalcBtn.disabled=true;
+      tableBody.innerHTML='';
+      if(prov){
+        fetch(`${kotaApi}?provinsi=${encodeURIComponent(prov)}`)
+          .then(r=>r.json()).then(list=>{
+            list.forEach(k=>{
+              const o=document.createElement('option');
+              o.value=k; o.textContent=k;
+              kotaFilter.appendChild(o);
+            });
+          });
+      }
+    };
+    kotaFilter.onchange = ()=> {
+      const kota = kotaFilter.value;
+      tableBody.innerHTML='';
+      if(!kota){
+        searchInput.disabled=true;
+        addBtn.disabled=true;
+        recalcBtn.disabled=true;
+      } else {
+        searchInput.disabled=false;
+        addBtn.disabled=false;
+        recalcBtn.disabled=false;
+        fetchAndRender();
+      }
+    };
+    searchInput.oninput = ()=> { if(kotaFilter.value) fetchAndRender(); };
+    [bmnFilter,fsFilter,fdFilter].forEach(chk=>{
+      chk.onchange = ()=> { if(kotaFilter.value) fetchAndRender(); };
+    });
+
+    async function fetchAndRender(){
+      const params = new URLSearchParams({
+        provinsi: provFilter.value,
+        kota: kotaFilter.value
+      });
+      const nama = searchInput.value.trim();
+      if(nama) params.set('nama', nama);
+
+      const list = await fetch(`${apiBase}?${params}`).then(r=>r.json());
+      const types = [];
+      if(bmnFilter.checked) types.push('BMN');
+      if(fsFilter.checked)  types.push('FS');
+      if(fdFilter.checked)  types.push('FD');
+
+      tableBody.innerHTML='';
+      list.filter(b=>{
+        const code = (b.id_bangunan||'').split('_')[0];
+        return types.length===0 || types.includes(code);
+      }).forEach(b=>{
+        const tr=document.createElement('tr');
+        tr.innerHTML=`
+          <td>${b.nama_gedung}</td>
+          <td>${b.alamat}</td>
+          <td>${b.kota}</td>
+          <td>${b.provinsi}</td>
+          <td>${b.lon}</td>
+          <td>${b.lat}</td>
+          <td>${b.taxonomy}</td>
+          <td>${b.luas}</td>
+          <td class="actions">
+            <button data-id="${b.id_bangunan}" class="editBtn">✎</button>
+            <button data-id="${b.id_bangunan}" class="delBtn">🗑</button>
+          </td>`;
+        tableBody.appendChild(tr);
+      });
+      attachRowHandlers();
+    }
+
+    function attachRowHandlers(){
+      document.querySelectorAll('.editBtn').forEach(btn=>
+        btn.onclick = ()=> openModal('edit', btn.dataset.id)
+      );
+      document.querySelectorAll('.delBtn').forEach(btn=>
+        btn.onclick = ()=> deleteBuilding(btn.dataset.id)
+      );
+    }
+
+    // map picker & geocoder...
+    let pickerMap, pickerMarker;
+    const mapSearch    = document.getElementById('mapSearch');
+    const suggestions  = document.getElementById('suggestions');
+    let searchTimeout;
+    mapSearch.addEventListener('input', ()=>{
+      clearTimeout(searchTimeout);
+      const q = mapSearch.value.trim();
+      suggestions.innerHTML='';
+      if(!q) return;
+      searchTimeout = setTimeout(()=>{
+        fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=5&q=${encodeURIComponent(q)}`)
+          .then(r=>r.json())
+          .then(results=>{
+            suggestions.innerHTML='';
+            results.forEach(r=>{
+              const li=document.createElement('li');
+              li.textContent=r.display_name;
+              li.onclick=()=>{
+                placeMarker(+r.lat,+r.lon);
+                pickerMap.setView([r.lat,r.lon],13);
+                suggestions.innerHTML='';
+                mapSearch.value=r.display_name;
+              };
+              suggestions.appendChild(li);
+            });
+          });
+      },300);
+    });
+
+    function initPickerMap(){
+      const latEl = document.getElementById('lat'),
+            lonEl = document.getElementById('lon');
+      const latVal = parseFloat(latEl.value),
+            lonVal = parseFloat(lonEl.value);
+      const center = (!isNaN(latVal)&&!isNaN(lonVal))
+                     ? [latVal,lonVal]
+                     : [-2.5,118];
+
+      if(pickerMap){
+        pickerMap.off(); pickerMap.remove();
+      }
+      pickerMap = L.map('pickerMap').setView(center, (!isNaN(latVal)&&!isNaN(lonVal))?13:5);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+        attribution:'&copy; OpenStreetMap'
+      }).addTo(pickerMap);
+
+      L.Control.geocoder({ defaultMarkGeocode:false })
+        .on('markgeocode', e=>{
+          placeMarker(e.geocode.center.lat,e.geocode.center.lng);
+          pickerMap.setView(e.geocode.center,13);
+        }).addTo(pickerMap);
+
+      pickerMap.on('click', e=> placeMarker(e.latlng.lat,e.latlng.lng));
+
+      if(!isNaN(latVal)&&!isNaN(lonVal)) placeMarker(latVal,lonVal);
+    }
+
+    function placeMarker(lat,lng){
+      if(pickerMarker) pickerMap.removeLayer(pickerMarker);
+      pickerMarker = L.marker([lat,lng],{draggable:true})
+        .addTo(pickerMap)
+        .bindPopup(`Lat: ${lat.toFixed(6)}<br>Lng: ${lng.toFixed(6)}`)
+        .openPopup();
+      document.getElementById('lat').value = lat.toFixed(6);
+      document.getElementById('lon').value = lng.toFixed(6);
+      pickerMarker.on('dragend', ()=>{
+        const p = pickerMarker.getLatLng();
+        document.getElementById('lat').value = p.lat.toFixed(6);
+        document.getElementById('lon').value = p.lng.toFixed(6);
+        pickerMarker.getPopup()
+          .setContent(`Lat: ${p.lat.toFixed(6)}<br>Lng: ${p.lng.toFixed(6)}`)
+          .openOn(pickerMap);
+      });
+    }
+
+    function openModal(mode,id=null){
+      modalMode = mode;
+      form.reset();
+      modalTitle.textContent = mode==='add'? 'Tambah Bangunan' : 'Edit Bangunan';
+      document.getElementById('id_bangunan').value = '';
+      document.getElementById('lon').value = '';
+      document.getElementById('lat').value = '';
+      loadProvinsiOptions(provModal);
+      kotaModal.innerHTML = '<option value="">— Pilih Kota —</option>';
+      kotaModal.disabled = true;
+      suggestions.innerHTML = '';
+      mapSearch.value = '';
+
+      if(mode==='add'){
+        kodeSelect.onchange = ()=>{
+          const code = kodeSelect.value;
+          if(code){
+            fetch(`${newIdApi}?taxonomy=${code}`)
+              .then(r=>r.json())
+              .then(j=> document.getElementById('id_bangunan').value = j.id_bangunan);
+          }
+        };
+        backdrop.style.display='flex';
+        initPickerMap();
+      } else {
+        fetch(`${apiBase}/${id}`)
+          .then(r=>r.json())
+          .then(b=>{
+            fields.forEach(f=>{
+              document.getElementById(f).value = b[f]||'';
+            });
+            // set kodeBangunan from existing ID prefix
+            const prefix = (b.id_bangunan||'').split('_')[0];
+            kodeSelect.value = prefix;
+            provModal.value = b.provinsi; provModal.onchange();
+            setTimeout(()=>{
+              kotaModal.value = b.kota;
+              kotaModal.disabled = false;
+            },200);
+            backdrop.style.display='flex';
+            initPickerMap();
+          });
+      }
+    }
+
+    function closeModal(){
+      backdrop.style.display='none';
+      if(pickerMap){
+        pickerMap.off(); pickerMap.remove();
+        pickerMap = null; pickerMarker = null;
+      }
+      suggestions.innerHTML='';
+    }
+
+    provModal.onchange = ()=>{
+      const prov = provModal.value;
+      kotaModal.innerHTML = '<option value="">— Pilih Kota —</option>';
+      kotaModal.disabled = !prov;
+      if(prov){
+        fetch(`${kotaApi}?provinsi=${encodeURIComponent(prov)}`)
+          .then(r=>r.json())
+          .then(list=>{
+            list.forEach(k=>{
+              const o=document.createElement('option');
+              o.value=k; o.textContent=k;
+              kotaModal.appendChild(o);
+            });
+          });
+      }
+    };
+
+    addBtn.onclick = ()=> openModal('add');
+    document.getElementById('cancelBtn').onclick = closeModal;
+
+    form.onsubmit = e=>{
+      e.preventDefault();
+      const data = {};
+      fields.forEach(f=>{
+        let v = document.getElementById(f).value;
+        if(['lon','lat','luas'].includes(f)) v = parseFloat(v);
+        data[f] = v;
+      });
+      const url    = modalMode==='edit'
+                     ? `${apiBase}/${data.id_bangunan}`
+                     : apiBase;
+      const method = modalMode==='edit' ? 'PUT' : 'POST';
+      fetch(url, {
+        method,
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(data)
+      })
+      .then(r=>{
+        if(!r.ok) throw new Error(r.status);
+        return r.json().catch(()=>null);
+      })
+      .then(()=>{
+        closeModal();
+        fetchAndRender();
+      })
+      .catch(err=>{
+        alert(`Gagal menyimpan (${method}): ${err}`);
+      });
+    };
+
+    async function deleteBuilding(id){
+      if(!confirm('Hapus bangunan ini?')) return;
+      await fetch(`${apiBase}/${id}`,{method:'DELETE'});
+      fetchAndRender();
+    }
+
+    recalcBtn.onclick = ()=>{
+      if(!confirm('Kalkulasi ulang?')) return;
+      fetch('/api/kalkulasiulang',{method:'POST'})
+        .then(()=>alert('Kalkulasi ulang selesai'));
+    };
+  </script>
+</body>
+</html>

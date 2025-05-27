@@ -1,0 +1,1294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>CARDINAL - Visualisasi AAL dan Direct Loss</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <!-- TailwindCSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      width: 100%;
+      font-family: 'Inter', sans-serif;
+      background-color: #f9fafb;
+    }
+    #map, #mapGedung {
+      height: 90vh;
+      width: 100%;
+    }
+    .info.legend {
+      line-height: 18px;
+      background: white;
+      padding: 6px 8px;
+      border-radius: 4px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+      font-size: 12px;
+      color: #555;
+    }
+    .province-label {
+      background: rgba(255,255,255,0.9);
+      padding: 2px 4px;
+      font-size: 12px;
+      font-weight: bold;
+      pointer-events: none;
+      white-space: nowrap;
+      border-radius: 4px;
+    }
+    .leaflet-tooltip.building-label {
+      background: transparent;
+      border: none;
+      box-shadow: none;
+      color: #333;
+      font-weight: bold;
+      font-size: 14px;
+      white-space: nowrap;
+    }
+    .search-container {
+      background: white;
+      padding: 8px;
+      border-radius: 8px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+      width: 300px;
+    }
+  </style>
+</head>
+
+<body>
+
+<!-- HEADER -->
+<header class="bg-white shadow p-6 flex items-center gap-4">
+  <div class="text-2xl font-extrabold text-blue-600">C</div>
+  <div>
+    <h1 class="text-2xl font-bold text-gray-800">CARDINAL</h1>
+    <p class="text-sm text-gray-500">Calculation for Direct and Average Annual Loss</p>
+  </div>
+</header>
+
+<!-- MAP CHOROPLETH SECTION -->
+<section class="relative">
+  <!-- Floating Filter Choropleth -->
+  <div class="absolute top-6 left-6 z-[1000] bg-white p-4 rounded-xl shadow-md flex flex-col gap-3 w-64">
+    <div>
+      <label for="hazardSelect" class="block text-sm font-semibold text-gray-700 mb-1">Bencana:</label>
+      <select id="hazardSelect" class="w-full rounded-lg border-gray-300">
+        <option value="">— Pilih —</option>
+        <option value="gempa">Gempa</option>
+        <option value="banjir">Banjir</option>
+        <option value="longsor">Longsor</option>
+        <option value="gunungberapi">Gunung Berapi</option>
+      </select>
+    </div>
+    <div>
+      <label for="periodSelect" class="block text-sm font-semibold text-gray-700 mb-1">Return Period:</label>
+      <select id="periodSelect" class="w-full rounded-lg border-gray-300" disabled>
+        <option value="">— Pilih —</option>
+      </select>
+    </div>
+    <div>
+      <label for="modelSelect" class="block text-sm font-semibold text-gray-700 mb-1">Model:</label>
+      <select id="modelSelect" class="w-full rounded-lg border-gray-300" disabled>
+        <option value="">— Pilih —</option>
+        <option value="bmn">BMN</option>
+        <option value="fs">FS</option>
+        <option value="fd">FD</option>
+        <option value="total">Total</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- MAP -->
+  <div id="map"></div>
+</section>
+<!-- CHART SECTION -->
+<section class="p-6">
+  <div class="max-w-7xl mx-auto bg-white p-6 rounded-2xl shadow flex flex-col gap-6">
+    
+    <div class="flex items-center gap-3">
+      <div class="p-2 bg-gray-100 rounded-full shadow">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2a10 10 0 100 20 10 10 0 000-20zM2 12h20" />
+        </svg>
+      </div>
+      <select id="provSelect" class="flex-1 rounded-lg border-gray-300">
+        <option value="">Pilih Provinsi</option>
+      </select>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div class="bg-gray-100 p-4 rounded-xl shadow">
+        <h3 class="text-sm font-bold text-gray-700 mb-2">Semua Bangunan</h3>
+        <canvas id="aalChart"></canvas>
+      </div>
+      <div class="bg-gray-100 p-4 rounded-xl shadow">
+        <h3 class="text-sm font-bold text-gray-700 mb-2">Bangunan Milik Negara</h3>
+        <canvas id="bmnChart"></canvas>
+      </div>
+      <div class="bg-gray-100 p-4 rounded-xl shadow">
+        <h3 class="text-sm font-bold text-gray-700 mb-2">Fasilitas Kesehatan</h3>
+        <canvas id="fsChart"></canvas>
+      </div>
+      <div class="bg-gray-100 p-4 rounded-xl shadow">
+        <h3 class="text-sm font-bold text-gray-700 mb-2">Fasilitas Pendidikan</h3>
+        <canvas id="fdChart"></canvas>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- MAP GEDUNG DIRECT LOSS SECTION -->
+<section class="relative mt-6">
+
+  <!-- FILTER Provinsi/Kota/Tipe -->
+  <div id="filter-container" class="absolute top-6 left-6 z-[1000] bg-white p-4 rounded-xl shadow-md flex gap-4 items-center">
+    <select id="provinsiSelect" class="border border-gray-300 rounded-lg p-2">
+      <option value="">— Pilih Provinsi —</option>
+    </select>
+    <select id="kotaSelect" class="border border-gray-300 rounded-lg p-2" disabled>
+      <option value="">— Pilih Kota —</option>
+    </select>
+    <div id="typeFilters" class="flex gap-3 text-sm font-semibold">
+      <label class="flex items-center gap-1"><input type="checkbox" id="bmnFilter" value="BMN" checked> BMN</label>
+      <label class="flex items-center gap-1"><input type="checkbox" id="fsFilter"  value="FS"  checked> FS</label>
+      <label class="flex items-center gap-1"><input type="checkbox" id="fdFilter"  value="FD"  checked> FD</label>
+    </div>
+  </div>
+
+  <!-- SEARCH Gedung -->
+  <div class="search-container absolute top-28 left-6 z-[1000] bg-white p-4 rounded-xl shadow-md w-[300px]">
+    <input type="text" id="search" placeholder="Cari nama gedung..." class="w-full p-2 border border-gray-300 rounded-lg" />
+    <div id="results" class="search-results mt-2"></div>
+    <div id="zoom-controls" class="mt-2"></div>
+  </div>
+
+  <!-- MAP GEDUNG -->
+  <div id="mapGedung"></div>
+
+</section>
+<!-- SCRIPT SECTION -->
+<!-- Leaflet + Chart.js -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<script>
+// Helper Format Rupiah
+function formatRupiah(num) {
+  return 'Rp ' + num.toLocaleString('id-ID', { minimumFractionDigits: 0 });
+}
+
+// Color Palette & Period Map
+const colors = ['#d73027', '#fc8d59', '#fee08b', '#d9ef8b', '#1a9850'];
+const periodMap = {
+  gempa: [500, 250, 100],
+  banjir: [100, 50, 25],
+  longsor: [5, 2],
+  gunungberapi: [250, 100, 50]
+};
+
+// ===========================
+// 1) MAP Choropleth
+// ===========================
+const map = L.map('map', { zoomControl: false }).setView([-2.5, 118], 5);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OSM' }).addTo(map);
+L.control.zoom({ position: 'topright' }).addTo(map);
+
+let geojsonData, choropleth, legend, labelLayer = L.layerGroup();
+const hazardSelect = document.getElementById('hazardSelect');
+const periodSelect = document.getElementById('periodSelect');
+const modelSelect = document.getElementById('modelSelect');
+
+fetch('/api/aal-provinsi')
+  .then(r => r.ok ? r.json() : Promise.reject(r.status))
+  .then(gj => geojsonData = gj)
+  .catch(e => console.error('Gagal load geojson:', e));
+
+hazardSelect.addEventListener('change', () => {
+  const h = hazardSelect.value;
+  periodSelect.innerHTML = '<option value="">— Pilih —</option>';
+  modelSelect.disabled = !h;
+  periodSelect.disabled = !h;
+  if (!h) return;
+  periodMap[h].forEach(p => {
+    const o = document.createElement('option');
+    o.value = p; o.textContent = p;
+    periodSelect.appendChild(o);
+  });
+});
+
+periodSelect.addEventListener('change', () => {
+  modelSelect.disabled = !periodSelect.value;
+});
+
+[hazardSelect, periodSelect, modelSelect].forEach(el => {
+  el.addEventListener('change', () => {
+    if (hazardSelect.value && periodSelect.value && modelSelect.value) updateChoropleth();
+  });
+});
+
+function updateChoropleth() {
+  const h = hazardSelect.value;
+  const p = periodSelect.value;
+  const m = modelSelect.value;
+  const metric = `aal_${h}_${p}_${m === 'total' ? 'total' : m}`;
+
+  if (choropleth) map.removeLayer(choropleth);
+  if (legend) map.removeControl(legend);
+  labelLayer.clearLayers();
+
+  const vals = geojsonData.features.map(f => f.properties[metric] || 0);
+  const minVal = Math.min(...vals);
+  const maxVal = Math.max(...vals);
+  const breaks = [
+    minVal + (maxVal - minVal) * 0.2,
+    minVal + (maxVal - minVal) * 0.4,
+    minVal + (maxVal - minVal) * 0.6,
+    minVal + (maxVal - minVal) * 0.8
+  ];
+
+  choropleth = L.geoJSON(geojsonData, {
+    style: feature => {
+      const v = feature.properties[metric] || 0;
+      let c = colors[0];
+      for (let i = breaks.length - 1; i >= 0; i--) {
+        if (v >= breaks[i]) { c = colors[i + 1]; break; }
+      }
+      return { fillColor: c, weight: 1, color: '#fff', fillOpacity: 0.7 };
+    }
+  }).addTo(map);
+
+  legend = L.control({ position: 'bottomright' });
+  legend.onAdd = () => {
+    const div = L.DomUtil.create('div', 'info legend');
+    const grades = [minVal, ...breaks, maxVal];
+    div.innerHTML = grades.map((g, i) =>
+      i < grades.length - 1 ? `<i style="background:${colors[i]}"></i> ${formatRupiah(Math.round(g))} – ${formatRupiah(Math.round(grades[i + 1]))}<br>` : ''
+    ).join('');
+    return div;
+  };
+  legend.addTo(map);
+}
+
+// ===========================
+// 2) CHARTS Section
+// ===========================
+const hazardLabels = ['Gempa 500', 'Gempa 250', 'Gempa 100', 'Banjir 100', 'Banjir 50', 'Banjir 25', 'Longsor 2', 'Longsor 5', 'Gunung 250', 'Gunung 100', 'Gunung 50'];
+
+let chartTotal, chartBmn, chartFs, chartFd;
+const provSelect = document.getElementById('provSelect');
+
+fetch('/api/aal-provinsi-list')
+  .then(r => r.ok ? r.json() : Promise.reject(r.status))
+  .then(list => {
+    list.forEach(prov => {
+      const o = document.createElement('option');
+      o.value = prov; o.textContent = prov;
+      provSelect.appendChild(o);
+    });
+  });
+
+provSelect.addEventListener('change', () => {
+  const prov = provSelect.value;
+  if (!prov) return;
+  fetch(`/api/aal-provinsi-data?provinsi=${encodeURIComponent(prov)}`)
+    .then(r => r.ok ? r.json() : Promise.reject(r.status))
+    .then(props => {
+      renderCharts(props);
+    });
+});
+
+function renderCharts(props) {
+  const makeChart = (id, label, data, oldChart) => {
+    if (!oldChart) {
+      return new Chart(document.getElementById(id).getContext('2d'), {
+        type: 'bar',
+        data: { labels: hazardLabels, datasets: [{ label, data }] },
+        options: { scales: { y: { beginAtZero: true, ticks: { callback: formatRupiah } } }, plugins: { tooltip: { callbacks: { label: ctx => formatRupiah(ctx.parsed.y) } } } }
+      });
+    } else {
+      oldChart.data.datasets[0].data = data;
+      oldChart.update();
+      return oldChart;
+    }
+  };
+
+  chartTotal = makeChart('aalChart', 'Semua Bangunan', [
+    props.aal_gempa_500_total, props.aal_gempa_250_total, props.aal_gempa_100_total,
+    props.aal_banjir_100_total, props.aal_banjir_50_total, props.aal_banjir_25_total,
+    props.aal_longsor_2_total, props.aal_longsor_5_total,
+    props.aal_gunungberapi_250_total, props.aal_gunungberapi_100_total, props.aal_gunungberapi_50_total
+  ], chartTotal);
+
+  chartBmn = makeChart('bmnChart', 'BMN', [
+    props.aal_gempa_500_bmn, props.aal_gempa_250_bmn, props.aal_gempa_100_bmn,
+    props.aal_banjir_100_bmn, props.aal_banjir_50_bmn, props.aal_banjir_25_bmn,
+    props.aal_longsor_2_bmn, props.aal_longsor_5_bmn,
+    props.aal_gunungberapi_250_bmn, props.aal_gunungberapi_100_bmn, props.aal_gunungberapi_50_bmn
+  ], chartBmn);
+
+  chartFs = makeChart('fsChart', 'Fasilitas Kesehatan', [
+    props.aal_gempa_500_fs, props.aal_gempa_250_fs, props.aal_gempa_100_fs,
+    props.aal_banjir_100_fs, props.aal_banjir_50_fs, props.aal_banjir_25_fs,
+    props.aal_longsor_2_fs, props.aal_longsor_5_fs,
+    props.aal_gunungberapi_250_fs, props.aal_gunungberapi_100_fs, props.aal_gunungberapi_50_fs
+  ], chartFs);
+
+  chartFd = makeChart('fdChart', 'Fasilitas Pendidikan', [
+    props.aal_gempa_500_fd, props.aal_gempa_250_fd, props.aal_gempa_100_fd,
+    props.aal_banjir_100_fd, props.aal_banjir_50_fd, props.aal_banjir_25_fd,
+    props.aal_longsor_2_fd, props.aal_longsor_5_fd,
+    props.aal_gunungberapi_250_fd, props.aal_gunungberapi_100_fd, props.aal_gunungberapi_50_fd
+  ], chartFd);
+}
+</script>
+<script>
+  // ===========================
+  // 3) MAP Direct Loss Gedung
+  // ===========================
+  const mapGedung = L.map('mapGedung', { zoomControl: false }).setView([-8.9, 116.4], 10);
+  const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OSM contributors' }).addTo(mapGedung);
+  const googleStreets = L.tileLayer('https://{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', { subdomains: ['mt0', 'mt1', 'mt2', 'mt3'] });
+  const googleSat = L.tileLayer('https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', { subdomains: ['mt0', 'mt1', 'mt2', 'mt3'] });
+  
+  const markerGroup = L.layerGroup().addTo(mapGedung);
+  
+  const provSelectGedung  = document.getElementById('provinsiSelect');
+  const kotaSelectGedung  = document.getElementById('kotaSelect');
+  const searchInputGedung = document.getElementById('search');
+  const resultsBoxGedung  = document.getElementById('results');
+  const bmnFilter         = document.getElementById('bmnFilter');
+  const fsFilter          = document.getElementById('fsFilter');
+  const fdFilter          = document.getElementById('fdFilter');
+  
+  const icons = {
+    BMN: L.icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png', shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png', iconSize: [12, 20], iconAnchor: [6, 20] }),
+    FS:  L.icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-green.png', shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png', iconSize: [12, 20], iconAnchor: [6, 20] }),
+    FD:  L.icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-blue.png', shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png', iconSize: [12, 20], iconAnchor: [6, 20] })
+  };
+  
+  let dataListGlobal = [];
+  
+  // Load Provinsi
+  fetch("/api/provinsi")
+    .then(r => r.ok ? r.json() : Promise.reject(r.status))
+    .then(list => {
+      list.forEach(p => {
+        const o = document.createElement('option');
+        o.value = p; o.textContent = p;
+        provSelectGedung.appendChild(o);
+      });
+    });
+  
+  provSelectGedung.addEventListener('change', () => {
+    kotaSelectGedung.innerHTML = '<option value="">— Pilih Kota —</option>';
+    kotaSelectGedung.disabled = !provSelectGedung.value;
+    clearAll();
+    if (!provSelectGedung.value) return;
+  
+    fetch(`/api/kota?provinsi=${encodeURIComponent(provSelectGedung.value)}`)
+      .then(r => r.ok ? r.json() : Promise.reject(r.status))
+      .then(list => {
+        list.forEach(k => {
+          const o = document.createElement('option');
+          o.value = k; o.textContent = k;
+          kotaSelectGedung.appendChild(o);
+        });
+      });
+  });
+  
+  kotaSelectGedung.addEventListener('change', () => {
+    clearAll();
+    if (!provSelectGedung.value || !kotaSelectGedung.value) return;
+  
+    fetch(`/api/gedung?provinsi=${encodeURIComponent(provSelectGedung.value)}&kota=${encodeURIComponent(kotaSelectGedung.value)}`)
+      .then(r => r.ok ? r.json() : Promise.reject(r.status))
+      .then(gj => {
+        const latlngs = gj.features.map(f => {
+          const [lon, lat] = f.geometry.coordinates;
+          return [lat, lon];
+        });
+        if (latlngs.length) {
+          mapGedung.fitBounds(L.latLngBounds(latlngs), { maxZoom: 14 });
+        }
+  
+        dataListGlobal = gj.features.map(f => {
+          const p = f.properties;
+          const [lon, lat] = f.geometry.coordinates;
+          const type = (p.id_bangunan || "").split('_')[0] || '';
+          const popup = `
+            <b>${p.nama_gedung}</b><br/>
+            <i>${p.taxonomy}</i> | Luas: ${p.luas} m²<br/>
+            ${p.alamat}<br/>
+            <small>${p.kota}, ${p.provinsi}</small>
+            <hr style="margin:4px 0;border:none;border-top:1px solid #ccc;"/>
+            <b>Kerugian Gempa:</b><br/>
+            &nbsp;&nbsp;500-th: ${formatRupiah(p.direct_loss_gempa_500)}<br/>
+            &nbsp;&nbsp;250-th: ${formatRupiah(p.direct_loss_gempa_250)}<br/>
+            &nbsp;&nbsp;100-th: ${formatRupiah(p.direct_loss_gempa_100)}<br/>
+            <b>Kerugian Banjir:</b><br/>
+            &nbsp;&nbsp;100-th: ${formatRupiah(p.direct_loss_banjir_100)}<br/>
+            &nbsp;&nbsp;50-th: ${formatRupiah(p.direct_loss_banjir_50)}<br/>
+            &nbsp;&nbsp;25-th: ${formatRupiah(p.direct_loss_banjir_25)}<br/>
+            <b>Kerugian Longsor:</b><br/>
+            &nbsp;&nbsp;5-th: ${formatRupiah(p.direct_loss_longsor_5)}<br/>
+            &nbsp;&nbsp;2-th: ${formatRupiah(p.direct_loss_longsor_2)}<br/>
+            <b>Kerugian Gunung Berapi:</b><br/>
+            &nbsp;&nbsp;250-th: ${formatRupiah(p.direct_loss_gunungberapi_250)}<br/>
+            &nbsp;&nbsp;100-th: ${formatRupiah(p.direct_loss_gunungberapi_100)}<br/>
+            &nbsp;&nbsp;50-th: ${formatRupiah(p.direct_loss_gunungberapi_50)}
+          `;
+          const m = L.marker([lat, lon], { icon: icons[type] || icons.FD })
+            .bindPopup(popup)
+            .bindTooltip(p.nama_gedung, {
+              permanent: false, direction: 'right', offset: [10, 0],
+              className: 'building-label'
+            });
+          return { nama: p.nama_gedung, type, marker: m };
+        });
+  
+        function update() {
+          const q = searchInputGedung.value.toLowerCase().trim();
+          const types = [];
+          if (bmnFilter.checked) types.push('BMN');
+          if (fsFilter.checked) types.push('FS');
+          if (fdFilter.checked) types.push('FD');
+  
+          resultsBoxGedung.innerHTML = '';
+          markerGroup.clearLayers();
+  
+          dataListGlobal.forEach(item => {
+            if (item.nama.toLowerCase().includes(q) && (types.length === 0 || types.includes(item.type))) {
+              markerGroup.addLayer(item.marker);
+              const div = document.createElement('div');
+              div.textContent = item.nama;
+              div.onclick = () => {
+                mapGedung.setView(item.marker.getLatLng(), 18);
+                item.marker.openPopup();
+              };
+              resultsBoxGedung.appendChild(div);
+            }
+          });
+  
+          const b = markerGroup.getBounds();
+          if (b.isValid()) mapGedung.fitBounds(b, { maxZoom: 14 });
+  
+          const z = mapGedung.getZoom();
+          dataListGlobal.forEach(item => {
+            if (z >= 15) item.marker.openTooltip();
+            else item.marker.closeTooltip();
+          });
+        }
+  
+        searchInputGedung.oninput = update;
+        bmnFilter.onchange = update;
+        fsFilter.onchange = update;
+        fdFilter.onchange = update;
+  
+        update();
+      });
+  });
+  
+  function clearAll() {
+    markerGroup.clearLayers();
+    resultsBoxGedung.innerHTML = '';
+    searchInputGedung.value = '';
+  }
+  
+  L.control.zoom({ position: 'topright' }).addTo(mapGedung);
+  document.getElementById('zoom-controls')
+    .appendChild(document.querySelector('.leaflet-control-zoom'));
+  L.control.layers(
+    { "OSM": osm, "Google St": googleStreets, "Google Sat": googleSat },
+    { "Gedung": markerGroup }
+  ).addTo(mapGedung);
+  </script>
+<!-- CRUD SECTION -->
+<section class="p-6">
+  <div class="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-6">
+    <!-- HSBGN CRUD -->
+    <div class="bg-white p-6 rounded-2xl shadow flex flex-col gap-4">
+      <h2 class="text-xl font-bold text-gray-800">Manajemen HSBGN</h2>
+
+      <div class="flex flex-col gap-2">
+        <label class="text-sm font-semibold">Provinsi:</label>
+        <select id="provFilterHSBGN" class="border p-2 rounded-lg">
+          <option value="">-- Semua Provinsi --</option>
+        </select>
+
+        <label class="text-sm font-semibold">Cari Kota:</label>
+        <input type="text" id="searchInputHSBGN" placeholder="ketik untuk cari..." class="border p-2 rounded-lg">
+      </div>
+
+      <table class="w-full text-sm mt-4">
+        <thead class="bg-red-700 text-white">
+          <tr>
+            <th class="p-2 text-left">Kota</th>
+            <th class="p-2 text-left">Provinsi</th>
+            <th class="p-2 text-left">Nilai HSBGN</th>
+            <th class="p-2 text-left">Aksi</th>
+          </tr>
+        </thead>
+        <tbody id="tableBodyHSBGN"></tbody>
+      </table>
+    </div>
+
+    <!-- Bangunan CRUD -->
+    <div class="bg-white p-6 rounded-2xl shadow flex flex-col gap-4">
+      <h2 class="text-xl font-bold text-gray-800">Manajemen Bangunan</h2>
+
+      <div class="flex flex-col md:flex-row flex-wrap gap-2 items-end">
+        <div class="flex flex-col flex-1">
+          <label class="text-sm font-semibold">Upload CSV:</label>
+          <input type="file" id="csvInputBangunan" class="border p-2 rounded-lg">
+        </div>
+        <button id="uploadCsvBtnBangunan" class="bg-red-600 hover:bg-red-700 text-white rounded-lg px-4 py-2" disabled>Upload</button>
+      </div>
+
+      <div class="flex flex-col md:flex-row flex-wrap gap-2 items-end">
+        <div class="flex flex-col flex-1">
+          <label class="text-sm font-semibold">Provinsi:</label>
+          <select id="provFilterBangunan" class="border p-2 rounded-lg">
+            <option value="">-- Pilih Provinsi --</option>
+          </select>
+        </div>
+        <div class="flex flex-col flex-1">
+          <label class="text-sm font-semibold">Kota/Kabupaten:</label>
+          <select id="kotaFilterBangunan" class="border p-2 rounded-lg" disabled>
+            <option value="">-- Pilih Kota --</option>
+          </select>
+        </div>
+        <div class="flex flex-col flex-1">
+          <label class="text-sm font-semibold">Cari Nama:</label>
+          <input type="text" id="searchInputBangunan" class="border p-2 rounded-lg" placeholder="ketik untuk cari..." disabled>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-3 mt-2">
+        <input type="checkbox" id="bmnFilterBangunan" checked> <label class="text-sm">BMN</label>
+        <input type="checkbox" id="fsFilterBangunan" checked> <label class="text-sm">FS</label>
+        <input type="checkbox" id="fdFilterBangunan" checked> <label class="text-sm">FD</label>
+        <div class="flex-1"></div>
+        <button id="addBtnBangunan" class="bg-green-600 hover:bg-green-700 text-white rounded-lg px-4 py-2" disabled>ADD +</button>
+      </div>
+
+      <table class="w-full text-sm mt-4">
+        <thead class="bg-red-700 text-white">
+          <tr>
+            <th class="p-2 text-left">Nama Gedung</th>
+            <th class="p-2 text-left">Alamat</th>
+            <th class="p-2 text-left">Kota</th>
+            <th class="p-2 text-left">Provinsi</th>
+            <th class="p-2 text-left">Lon</th>
+            <th class="p-2 text-left">Lat</th>
+            <th class="p-2 text-left">Taxonomy</th>
+            <th class="p-2 text-left">Luas</th>
+            <th class="p-2 text-left">Aksi</th>
+          </tr>
+        </thead>
+        <tbody id="tableBodyBangunan"></tbody>
+      </table>
+
+      <button id="recalcBtnBangunan" class="bg-blue-600 hover:bg-blue-700 text-white rounded-lg px-4 py-2 mt-2" disabled>Kalkulasi Ulang</button>
+    </div>
+  </div>
+</section>
+<script>
+// ===========================
+// 4) SCRIPT CRUD HSBGN
+// ===========================
+const apiBaseHSBGN = '/api/hsbgn';
+const provApiHSBGN = '/api/provinsi';
+
+const provFilterHSBGN = document.getElementById('provFilterHSBGN');
+const searchInputHSBGN = document.getElementById('searchInputHSBGN');
+const tableBodyHSBGN = document.getElementById('tableBodyHSBGN');
+
+let allDataHSBGN = [];
+
+document.addEventListener('DOMContentLoaded', () => {
+  loadProvinsiHSBGN();
+  loadHSBGN();
+  loadProvinsiBangunan();
+});
+
+provFilterHSBGN.addEventListener('change', renderTableHSBGN);
+searchInputHSBGN.addEventListener('input', renderTableHSBGN);
+
+async function loadHSBGN() {
+  const res = await fetch(apiBaseHSBGN);
+  allDataHSBGN = await res.json();
+  renderTableHSBGN();
+}
+
+function renderTableHSBGN() {
+  const provVal = provFilterHSBGN.value.toLowerCase();
+  const searchVal = searchInputHSBGN.value.toLowerCase();
+  const filtered = allDataHSBGN.filter(item =>
+    (!provVal || item.provinsi.toLowerCase() === provVal) &&
+    (!searchVal || item.kota.toLowerCase().includes(searchVal))
+  );
+  tableBodyHSBGN.innerHTML = filtered.map(r => {
+    const formatted = 'Rp ' + Number(r.hsbgn).toLocaleString('id-ID');
+    return `
+    <tr>
+      <td class="p-2">${r.kota}</td>
+      <td class="p-2">${r.provinsi}</td>
+      <td class="p-2">${formatted}</td>
+      <td class="p-2">
+        <button onclick="editHSBGN('${r.id_kota}')" class="text-blue-600 hover:underline">✏️ Edit</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+// === GANTI fungsi editHSBGN untuk pakai Modal ===
+function editHSBGN(id) {
+  // ambil data yang sudah di-load
+  const data = allDataHSBGN.find(d => d.id_kota === id);
+  if (!data) return;
+
+  // isi form modal
+  document.getElementById('editIdHSBGN').value       = data.id_kota;
+  document.getElementById('editKotaHSBGN').value     = data.kota;
+  document.getElementById('editProvinsiHSBGN').value = data.provinsi;
+  document.getElementById('editNilaiHSBGN').value    = data.hsbgn;
+
+  // tampilkan modal
+  editBackdropHSBGN.classList.remove('hidden');
+  editBackdropHSBGN.classList.add('flex');
+}
+
+
+async function loadProvinsiHSBGN() {
+  const res = await fetch(provApiHSBGN);
+  const list = await res.json();
+  provFilterHSBGN.innerHTML = '<option value="">-- Semua Provinsi --</option>';
+  list.forEach(p => {
+    const o = document.createElement('option');
+    o.value = p; o.textContent = p;
+    provFilterHSBGN.appendChild(o);
+  });
+}
+</script>
+<script>
+// ===========================
+// 5) SCRIPT CRUD Bangunan
+// ===========================
+const apiBaseBangunan = '/api/bangunan';
+const provApiBangunan = '/api/bangunan/provinsi';
+const kotaApiBangunan = '/api/bangunan/kota';
+
+const provFilterBangunan = document.getElementById('provFilterBangunan');
+const kotaFilterBangunan = document.getElementById('kotaFilterBangunan');
+const searchInputBangunan = document.getElementById('searchInputBangunan');
+const bmnFilterBangunan = document.getElementById('bmnFilterBangunan');
+const fsFilterBangunan = document.getElementById('fsFilterBangunan');
+const fdFilterBangunan = document.getElementById('fdFilterBangunan');
+const tableBodyBangunan = document.getElementById('tableBodyBangunan');
+const uploadCsvBtnBangunan = document.getElementById('uploadCsvBtnBangunan');
+const csvInputBangunan = document.getElementById('csvInputBangunan');
+const addBtnBangunan = document.getElementById('addBtnBangunan');
+const recalcBtnBangunan = document.getElementById('recalcBtnBangunan');
+async function loadProvinsiBangunan() {
+  const res = await fetch(provApiBangunan);
+  const list = await res.json();
+  provFilterBangunan.innerHTML = '<option value="">-- Pilih Provinsi --</option>';
+  list.forEach(p => {
+    const o = document.createElement('option');
+    o.value = p;
+    o.textContent = p;
+    provFilterBangunan.appendChild(o);
+  });
+}
+
+
+csvInputBangunan.addEventListener('change', () => {
+  uploadCsvBtnBangunan.disabled = !csvInputBangunan.files.length;
+});
+
+uploadCsvBtnBangunan.addEventListener('click', async () => {
+  if (!csvInputBangunan.files.length) return;
+  uploadCsvBtnBangunan.disabled = true;
+  const formData = new FormData();
+  formData.append('file', csvInputBangunan.files[0]);
+  try {
+    const res = await fetch(`${apiBaseBangunan}/upload`, { method: 'POST', body: formData });
+    if (!res.ok) throw new Error('Upload gagal');
+    alert('Upload berhasil');
+    fetchAndRenderBangunan();
+  } catch (e) {
+    alert('Gagal upload CSV: ' + e.message);
+  } finally {
+    uploadCsvBtnBangunan.disabled = false;
+    csvInputBangunan.value = null;
+  }
+});
+
+provFilterBangunan.addEventListener('change', () => {
+  kotaFilterBangunan.innerHTML = '<option value="">-- Pilih Kota --</option>';
+  kotaFilterBangunan.disabled = true;
+  searchInputBangunan.value = '';
+  addBtnBangunan.disabled = true;
+  recalcBtnBangunan.disabled = true;
+  tableBodyBangunan.innerHTML = '';
+
+  if (provFilterBangunan.value) {
+    fetch(`${kotaApiBangunan}?provinsi=${encodeURIComponent(provFilterBangunan.value)}`)
+      .then(r => r.json())
+      .then(list => {
+        list.forEach(k => {
+          const o = document.createElement('option');
+          o.value = k;
+          o.textContent = k;
+          kotaFilterBangunan.appendChild(o);
+        });
+        kotaFilterBangunan.disabled = false;
+      });
+  }
+});
+
+kotaFilterBangunan.addEventListener('change', () => {
+  if (!kotaFilterBangunan.value) {
+    searchInputBangunan.disabled = true;
+    addBtnBangunan.disabled = true;
+    recalcBtnBangunan.disabled = true;
+    tableBodyBangunan.innerHTML = '';
+  } else {
+    searchInputBangunan.disabled = false;
+    addBtnBangunan.disabled = false;
+    recalcBtnBangunan.disabled = false;
+    fetchAndRenderBangunan();
+  }
+});
+
+kotaFilterBangunan.addEventListener('change', fetchAndRenderBangunan);
+searchInputBangunan.addEventListener('input', fetchAndRenderBangunan);
+[bmnFilterBangunan, fsFilterBangunan, fdFilterBangunan].forEach(el => {
+  el.addEventListener('change', fetchAndRenderBangunan);
+});
+
+async function fetchAndRenderBangunan() {
+  if (!kotaFilterBangunan.value) return;
+
+  const params = new URLSearchParams({
+    provinsi: provFilterBangunan.value,
+    kota: kotaFilterBangunan.value,
+    nama: searchInputBangunan.value.trim()
+  });
+
+  const list = await fetch(`${apiBaseBangunan}?${params}`).then(r => r.json());
+  const types = [];
+  if (bmnFilterBangunan.checked) types.push('BMN');
+  if (fsFilterBangunan.checked) types.push('FS');
+  if (fdFilterBangunan.checked) types.push('FD');
+
+  tableBodyBangunan.innerHTML = '';
+  list.filter(b => {
+    const code = (b.id_bangunan || '').split('_')[0];
+    return types.length === 0 || types.includes(code);
+  }).forEach(b => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="p-2">${b.nama_gedung}</td>
+      <td class="p-2">${b.alamat}</td>
+      <td class="p-2">${b.kota}</td>
+      <td class="p-2">${b.provinsi}</td>
+      <td class="p-2">${b.lon}</td>
+      <td class="p-2">${b.lat}</td>
+      <td class="p-2">${b.taxonomy}</td>
+      <td class="p-2">${b.luas}</td>
+      <td class="p-2">
+        <button onclick="editBangunan('${b.id_bangunan}')" class="text-blue-600 hover:underline">✏️</button>
+        <button onclick="deleteBangunan('${b.id_bangunan}')" class="text-red-600 hover:underline">🗑️</button>
+      </td>
+    `;
+    tableBodyBangunan.appendChild(tr);
+  });
+}
+
+async function deleteBangunan(id) {
+  if (!confirm('Hapus bangunan ini?')) return;
+  await fetch(`${apiBaseBangunan}/${id}`, { method: 'DELETE' });
+  fetchAndRenderBangunan();
+}
+
+function editBangunan(id) {
+  alert('Form Edit Bangunan belum diintegrasikan (karena butuh Modal khusus)');
+}
+
+recalcBtnBangunan.onclick = () => {
+  if (!confirm('Lakukan kalkulasi ulang?')) return;
+  fetch('/api/kalkulasiulang', { method: 'POST' })
+    .then(() => alert('Kalkulasi ulang selesai'));
+};
+</script>
+<!-- MODAL EDIT BANGUNAN -->
+<div id="editBackdropBangunan" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-[2000]">
+  <div class="bg-white rounded-2xl p-6 w-full max-w-lg shadow-lg relative">
+    <h2 class="text-xl font-bold text-gray-800 mb-4">Edit Bangunan</h2>
+    <form id="editFormBangunan" class="flex flex-col gap-4">
+
+      <input type="hidden" id="editIdBangunan">
+
+      <div>
+        <label class="text-sm font-semibold">Nama Gedung</label>
+        <input type="text" id="editNamaGedung" class="border p-2 w-full rounded-lg" required>
+      </div>
+
+      <div>
+        <label class="text-sm font-semibold">Alamat</label>
+        <input type="text" id="editAlamat" class="border p-2 w-full rounded-lg" required>
+      </div>
+
+      <div class="grid grid-cols-2 gap-2">
+        <div>
+          <label class="text-sm font-semibold">Longitude</label>
+          <input type="number" id="editLon" class="border p-2 w-full rounded-lg" step="any" required>
+        </div>
+        <div>
+          <label class="text-sm font-semibold">Latitude</label>
+          <input type="number" id="editLat" class="border p-2 w-full rounded-lg" step="any" required>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-2">
+        <div>
+          <label class="text-sm font-semibold">Taxonomy</label>
+          <select id="editTaxonomy" class="border p-2 w-full rounded-lg" required>
+            <option value="CR">CR</option>
+            <option value="MCF">MCF</option>
+            <option value="MUR">MUR</option>
+            <option value="LightWood">Light Wood</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-sm font-semibold">Luas (m²)</label>
+          <input type="number" id="editLuas" class="border p-2 w-full rounded-lg" step="any" required>
+        </div>
+      </div>
+
+      <div class="flex justify-end gap-4 mt-4">
+        <button type="button" id="cancelEditBangunan" class="bg-gray-400 hover:bg-gray-500 text-white px-4 py-2 rounded-lg">Batal</button>
+        <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg">Simpan Perubahan</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- MODAL EDIT HSBGN -->
+<div id="editBackdropHSBGN" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-[2000]">
+  <div class="bg-white rounded-2xl p-6 w-full max-w-md shadow-lg relative">
+    <h2 class="text-xl font-bold text-gray-800 mb-4">Edit HSBGN</h2>
+    <form id="editFormHSBGN" class="flex flex-col gap-4">
+      <input type="hidden" id="editIdHSBGN">
+
+      <div>
+        <label class="text-sm font-semibold">Kota</label>
+        <input type="text" id="editKotaHSBGN" class="border p-2 w-full rounded-lg" readonly>
+      </div>
+
+      <div>
+        <label class="text-sm font-semibold">Provinsi</label>
+        <input type="text" id="editProvinsiHSBGN" class="border p-2 w-full rounded-lg" readonly>
+      </div>
+
+      <div>
+        <label class="text-sm font-semibold">Nilai HSBGN (Rp)</label>
+        <input type="number" id="editNilaiHSBGN" class="border p-2 w-full rounded-lg" required>
+      </div>
+
+      <div class="flex justify-end gap-4 mt-4">
+        <button type="button" id="cancelEditHSBGN" class="bg-gray-400 hover:bg-gray-500 text-white px-4 py-2 rounded-lg">Batal</button>
+        <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg">Simpan Perubahan</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+  const editBackdropHSBGN  = document.getElementById('editBackdropHSBGN');
+  const editFormHSBGN      = document.getElementById('editFormHSBGN');
+
+  // tombol Batal
+  document.getElementById('cancelEditHSBGN').onclick = () => {
+    editBackdropHSBGN.classList.add('hidden');
+  };
+
+  // submit perubahan
+  editFormHSBGN.onsubmit = async (e) => {
+    e.preventDefault();
+    const id    = document.getElementById('editIdHSBGN').value;
+    const nilai = parseFloat(document.getElementById('editNilaiHSBGN').value);
+
+    const res = await fetch(`${apiBaseHSBGN}/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ hsbgn: nilai })
+    });
+    if (!res.ok) {
+      alert('Gagal simpan HSBGN');
+    }
+    editBackdropHSBGN.classList.add('hidden');
+    loadHSBGN(); // reload tabel
+  };
+</script>
+
+<script>
+// ============================
+// 6) SCRIPT Modal Edit Bangunan
+// ============================
+const editBackdropBangunan = document.getElementById('editBackdropBangunan');
+const editFormBangunan = document.getElementById('editFormBangunan');
+
+function editBangunan(id) {
+  fetch(`/api/bangunan/${id}`)
+    .then(r => r.json())
+    .then(b => {
+      document.getElementById('editIdBangunan').value = b.id_bangunan;
+      document.getElementById('editNamaGedung').value = b.nama_gedung;
+      document.getElementById('editAlamat').value = b.alamat;
+      document.getElementById('editLon').value = b.lon;
+      document.getElementById('editLat').value = b.lat;
+      document.getElementById('editTaxonomy').value = b.taxonomy;
+      document.getElementById('editLuas').value = b.luas;
+      editBackdropBangunan.classList.remove('hidden');
+      editBackdropBangunan.classList.add('flex');
+    });
+}
+
+document.getElementById('cancelEditBangunan').onclick = () => {
+  editBackdropBangunan.classList.add('hidden');
+};
+
+editFormBangunan.onsubmit = async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('editIdBangunan').value;
+  const data = {
+    nama_gedung: document.getElementById('editNamaGedung').value,
+    alamat: document.getElementById('editAlamat').value,
+    lon: parseFloat(document.getElementById('editLon').value),
+    lat: parseFloat(document.getElementById('editLat').value),
+    taxonomy: document.getElementById('editTaxonomy').value,
+    luas: parseFloat(document.getElementById('editLuas').value)
+  };
+
+  await fetch(`/api/bangunan/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type':'application/json' },
+    body: JSON.stringify(data)
+  });
+
+  editBackdropBangunan.classList.add('hidden');
+  fetchAndRenderBangunan();
+};
+</script>
+
+<!-- MODAL EDIT HSBGN -->
+<div id="editBackdropHSBGN" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-[2000]">
+  <div class="bg-white rounded-2xl p-6 w-full max-w-md shadow-lg relative">
+    <h2 class="text-xl font-bold text-gray-800 mb-4">Edit HSBGN</h2>
+    <form id="editFormHSBGN" class="flex flex-col gap-4">
+      <input type="hidden" id="editIdHSBGN">
+
+      <div>
+        <label class="text-sm font-semibold">Kota</label>
+        <input type="text" id="editKotaHSBGN" class="border p-2 w-full rounded-lg" readonly>
+      </div>
+
+      <div>
+        <label class="text-sm font-semibold">Provinsi</label>
+        <input type="text" id="editProvinsiHSBGN" class="border p-2 w-full rounded-lg" readonly>
+      </div>
+
+      <div>
+        <label class="text-sm font-semibold">Nilai HSBGN (Rp)</label>
+        <input type="number" id="editNilaiHSBGN" class="border p-2 w-full rounded-lg" required>
+      </div>
+
+      <div class="flex justify-end gap-4 mt-4">
+        <button type="button" id="cancelEditHSBGN" class="bg-gray-400 hover:bg-gray-500 text-white px-4 py-2 rounded-lg">Batal</button>
+        <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg">Simpan Perubahan</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+
+<!-- MODAL ADD BANGUNAN -->
+<div id="addBackdropBangunan" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-[2000]">
+  <div class="bg-white rounded-2xl p-6 w-full max-w-lg shadow-lg relative">
+    <h2 class="text-xl font-bold text-gray-800 mb-4">Tambah Bangunan</h2>
+    <form id="addFormBangunan" class="flex flex-col gap-4">
+
+      <div>
+        <label class="text-sm font-semibold">Nama Gedung</label>
+        <input type="text" id="addNamaGedung" class="border p-2 w-full rounded-lg" required>
+      </div>
+
+      <div>
+        <label class="text-sm font-semibold">Alamat</label>
+        <input type="text" id="addAlamat" class="border p-2 w-full rounded-lg" required>
+      </div>
+      <div>
+        <label class="text-sm font-semibold">Provinsi</label>
+        <select id="addProvinsi" class="border p-2 w-full rounded-lg" required>
+          <option value="">-- Pilih Provinsi --</option>
+        </select>
+      </div>
+      
+      <div>
+        <label class="text-sm font-semibold">Kota/Kabupaten</label>
+        <select id="addKota" class="border p-2 w-full rounded-lg" required disabled>
+          <option value="">-- Pilih Kota --</option>
+        </select>
+      </div>
+      
+      <div class="grid grid-cols-2 gap-2">
+        <div>
+          <label class="text-sm font-semibold">Longitude</label>
+          <input type="number" id="addLon" class="border p-2 w-full rounded-lg" step="any" required>
+        </div>
+        <div>
+          <label class="text-sm font-semibold">Latitude</label>
+          <input type="number" id="addLat" class="border p-2 w-full rounded-lg" step="any" required>
+        </div>
+      </div>
+      
+
+      <div>
+        <label class="text-sm font-semibold">Kode Bangunan</label>
+        <select id="addKodeBangunan" class="border p-2 w-full rounded-lg" required>
+          <option value="">-- Pilih Kode --</option>
+          <option value="BMN">BMN</option>
+          <option value="FS">FS</option>
+          <option value="FD">FD</option>
+        </select>
+      </div>
+
+      <div class="grid grid-cols-2 gap-2">
+        <div>
+          <label class="text-sm font-semibold">Taxonomy</label>
+          <select id="addTaxonomy" class="border p-2 w-full rounded-lg" required>
+            <option value="CR">CR</option>
+            <option value="MCF">MCF</option>
+            <option value="MUR">MUR</option>
+            <option value="LightWood">Light Wood</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-sm font-semibold">Luas (m²)</label>
+          <input type="number" id="addLuas" class="border p-2 w-full rounded-lg" step="any" required>
+        </div>
+      </div>
+
+      <div class="flex justify-end gap-4 mt-4">
+        <button type="button" id="cancelAddBangunan" class="bg-gray-400 hover:bg-gray-500 text-white px-4 py-2 rounded-lg">Batal</button>
+        <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg">Tambah Bangunan</button>
+      </div>
+    </form>
+  </div>
+</div>
+<script>
+// ============================
+// 7) SCRIPT Modal ADD Bangunan
+// ============================
+const addBackdropBangunan = document.getElementById('addBackdropBangunan');
+const addFormBangunan = document.getElementById('addFormBangunan');
+
+// === Tambahan untuk dropdown Provinsi/Kota di ADD Modal ===
+const addProvinsiSelect = document.getElementById('addProvinsi');
+const addKotaSelect = document.getElementById('addKota');
+const addKodeBangunanSelect = document.getElementById('addKodeBangunan');
+
+async function loadProvinsiUntukAdd() {
+  const res = await fetch('/api/bangunan/provinsi');
+  const list = await res.json();
+  addProvinsiSelect.innerHTML = '<option value="">-- Pilih Provinsi --</option>';
+  list.forEach(prov => {
+    const o = document.createElement('option');
+    o.value = prov;
+    o.textContent = prov;
+    addProvinsiSelect.appendChild(o);
+  });
+}
+
+// kalau Provinsi dipilih, baru load Kota
+addProvinsiSelect.addEventListener('change', () => {
+  addKotaSelect.innerHTML = '<option value="">-- Pilih Kota --</option>';
+  addKotaSelect.disabled = true;
+  if (addProvinsiSelect.value) {
+    fetch(`/api/bangunan/kota?provinsi=${encodeURIComponent(addProvinsiSelect.value)}`)
+      .then(r => r.json())
+      .then(list => {
+        list.forEach(kota => {
+          const o = document.createElement('option');
+          o.value = kota;
+          o.textContent = kota;
+          addKotaSelect.appendChild(o);
+        });
+        addKotaSelect.disabled = false;
+      });
+  }
+});
+
+
+document.getElementById('addBtnBangunan').onclick = () => {
+  loadProvinsiUntukAdd(); // ini penting !!
+  addBackdropBangunan.classList.remove('hidden');
+  addBackdropBangunan.classList.add('flex');
+};
+
+document.getElementById('cancelAddBangunan').onclick = () => {
+  addBackdropBangunan.classList.add('hidden');
+};
+
+addFormBangunan.onsubmit = async (e) => {
+  e.preventDefault();
+
+  const kode = document.getElementById('addKodeBangunan').value;
+
+  // Dapatkan ID unik dari backend
+  const idRes = await fetch(`/api/bangunan/new-id?taxonomy=${encodeURIComponent(kode)}`);
+  if (!idRes.ok) {
+    alert('Gagal mendapatkan ID bangunan baru');
+    return;
+  }
+
+  const { id_bangunan } = await idRes.json();
+
+  const payload = {
+    id_bangunan,  // WAJIB DITAMBAH!
+    nama_gedung: document.getElementById('addNamaGedung').value,
+    alamat: document.getElementById('addAlamat').value,
+    provinsi: document.getElementById('addProvinsi').value,
+    kota: document.getElementById('addKota').value,
+    lon: parseFloat(document.getElementById('addLon').value),
+    lat: parseFloat(document.getElementById('addLat').value),
+    taxonomy: document.getElementById('addTaxonomy').value,
+    luas: parseFloat(document.getElementById('addLuas').value),
+    kode_bangunan: kode
+  };
+
+  console.log("PAYLOAD KIRIM:", payload); // opsional debugging
+
+  const res = await fetch('/api/bangunan', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+
+  if (!res.ok) {
+    const err = await res.json();
+    alert('Gagal tambah bangunan: ' + (err.error || 'Unknown error'));
+    return;
+  }
+
+  addBackdropBangunan.classList.add('hidden');
+  fetchAndRenderBangunan();
+};
+
+
+</script>
+<script>
+// ============================
+// 8) SCRIPT Delete Confirmation
+// ============================
+async function deleteBangunan(id) {
+  if (!confirm('Apakah Anda yakin ingin menghapus bangunan ini?')) return;
+  await fetch(`/api/bangunan/${id}`, { method: 'DELETE' });
+  fetchAndRenderBangunan();
+}
+</script>
+<!-- MODAL ADD HSBGN -->
+<div id="addBackdropHSBGN" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-[2000]">
+  <div class="bg-white rounded-2xl p-6 w-full max-w-md shadow-lg relative">
+    <h2 class="text-xl font-bold text-gray-800 mb-4">Tambah HSBGN</h2>
+    <form id="addFormHSBGN" class="flex flex-col gap-4">
+
+      <div>
+        <label class="text-sm font-semibold">Provinsi</label>
+        <input type="text" id="addProvinsiHSBGN" class="border p-2 w-full rounded-lg" placeholder="Nama Provinsi" required>
+      </div>
+
+      <div>
+        <label class="text-sm font-semibold">Kota/Kabupaten</label>
+        <input type="text" id="addKotaHSBGN" class="border p-2 w-full rounded-lg" placeholder="Nama Kota" required>
+      </div>
+
+      <div>
+        <label class="text-sm font-semibold">Nilai HSBGN</label>
+        <input type="text" id="addNilaiHSBGN" class="border p-2 w-full rounded-lg" placeholder="Rp (contoh: 5000000)" required>
+      </div>
+
+      <div class="flex justify-end gap-4 mt-4">
+        <button type="button" id="cancelAddHSBGN" class="bg-gray-400 hover:bg-gray-500 text-white px-4 py-2 rounded-lg">Batal</button>
+        <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg">Tambah HSBGN</button>
+      </div>
+    </form>
+  </div>
+</div>
+<script>
+// ============================
+// 9) SCRIPT Modal Add HSBGN
+// ============================
+const addBackdropHSBGN = document.getElementById('addBackdropHSBGN');
+const addFormHSBGN = document.getElementById('addFormHSBGN');
+
+// Tombol trigger modal (bikin tombol di bagian HSBGN table)
+const btnAddHSBGN = document.createElement('button');
+btnAddHSBGN.textContent = "ADD +";
+btnAddHSBGN.className = "mt-2 bg-green-600 hover:bg-green-700 text-white rounded-lg px-4 py-2";
+document.querySelector('.container .header').appendChild(btnAddHSBGN);
+
+btnAddHSBGN.onclick = () => {
+  addBackdropHSBGN.classList.remove('hidden');
+  addBackdropHSBGN.classList.add('flex');
+};
+
+document.getElementById('cancelAddHSBGN').onclick = () => {
+  addBackdropHSBGN.classList.add('hidden');
+};
+
+addFormHSBGN.onsubmit = async (e) => {
+  e.preventDefault();
+
+  const prov = document.getElementById('addProvinsiHSBGN').value.trim();
+  const kota = document.getElementById('addKotaHSBGN').value.trim();
+  const nilaiStr = document.getElementById('addNilaiHSBGN').value.replace(/\./g,'').trim();
+
+  if (!prov || !kota || !nilaiStr) {
+    alert('Semua field harus diisi!');
+    return;
+  }
+
+  const payload = {
+    provinsi: prov,
+    kota: kota,
+    hsbgn: parseFloat(nilaiStr)
+  };
+
+  const res = await fetch('/api/hsbgn', {
+    method: 'POST',
+    headers: { 'Content-Type':'application/json' },
+    body: JSON.stringify(payload)
+  });
+
+  if (res.ok) {
+    addBackdropHSBGN.classList.add('hidden');
+    loadHSBGN();
+  } else {
+    alert('Gagal tambah HSBGN');
+  }
+};
+</script>
+

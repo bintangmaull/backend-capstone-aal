@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Choropleth Buffer Gempa with Nearest‑Point Popup</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <style>
+    body, html { margin:0; padding:0; height:100%; }
+    #map { width:100%; height:100%; }
+    .control-container {
+      position: absolute; top: 10px; left: 10px;
+      background: white; padding: 6px; border-radius: 4px;
+      box-shadow: 0 0 6px rgba(0,0,0,0.2); z-index:1000;
+      font-family: sans-serif; font-size: 14px;
+    }
+    .info.legend {
+      background: white; padding: 6px; line-height: 18px;
+      color: #333; box-shadow: 0 0 6px rgba(0,0,0,0.2);
+    }
+    .info.legend i {
+      width: 18px; height: 18px; float: left;
+      margin-right: 8px; opacity: 0.7;
+    }
+  </style>
+</head>
+<body>
+  <div class="control-container">
+    <label for="fieldSelect">Pilih Intensitas:</label><br>
+    <select id="fieldSelect">
+      <option value="mmi_500">mmi_500</option>
+      <option value="mmi_250">mmi_250</option>
+      <option value="mmi_100">mmi_100</option>
+    </select>
+  </div>
+  <div id="map"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const map = L.map('map').setView([-6.2, 106.8], 9);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+
+    let bufferLayer, centroidLayer, legendControl;
+    let currentField = document.getElementById('fieldSelect').value;
+
+    // Jenks natural breaks implementation (same as before) …
+    function getJenksBreaks(data, n) {
+      data.sort((a,b)=>a-b);
+      const lower = Array(data.length+1).fill().map(()=>Array(n+1).fill(0));
+      const variance = Array(data.length+1).fill().map(()=>Array(n+1).fill(Infinity));
+      for(let i=1;i<=n;i++){ lower[1][i]=1; variance[1][i]=0; }
+      for(let l=2;l<=data.length;l++){
+        let sum=0,sumSq=0,w=0;
+        for(let m=1;m<=l;m++){
+          const val=data[l-m]; sum+=val; sumSq+=val*val; w++;
+          const varCost=sumSq - (sum*sum)/w;
+          const i4=l-m;
+          if(i4>0){
+            for(let j=2;j<=n;j++){
+              const cost = varCost + variance[i4][j-1];
+              if(variance[l][j] > cost){
+                lower[l][j] = i4+1;
+                variance[l][j] = cost;
+              }
+            }
+          }
+        }
+        variance[l][1] = sumSq - (sum*sum)/w;
+        lower[l][1] = 1;
+      }
+      const breaks = Array(n+1).fill(0);
+      breaks[n] = data[data.length-1];
+      breaks[0] = data[0];
+      let k = data.length, count=n;
+      while(count>1){
+        const idx = lower[k][count] - 2;
+        breaks[count-1] = data[idx];
+        k = lower[k][count]-1;
+        count--;
+      }
+      return breaks;
+    }
+
+    const colorScale = ['#FFEDA0','#FED976','#FD8D3C','#FC4E2A','#E31A1C','#BD0026'];
+    const nullColor = '#CCCCCC';
+    let breaks = [];
+
+    function getColor(d) {
+      if (d == null || isNaN(d)) return nullColor;
+      for(let i=breaks.length-1; i>0; i--){
+        if(d >= breaks[i]) return colorScale[i-1];
+      }
+      return colorScale[0];
+    }
+
+    function updateLegend() {
+      if(legendControl) map.removeControl(legendControl);
+      legendControl = L.control({position:'bottomright'});
+      legendControl.onAdd = () => {
+        const div = L.DomUtil.create('div','info legend');
+        for(let i=0;i<breaks.length-1;i++){
+          div.innerHTML +=
+            `<i style="background:${colorScale[i]}"></i> ` +
+            `${breaks[i].toFixed(2)} – ${breaks[i+1].toFixed(2)}<br>`;
+        }
+        div.innerHTML += `<i style="background:${nullColor}"></i> Null / no value<br>`;
+        return div;
+      };
+      legendControl.addTo(map);
+    }
+
+    // fetch nearest original point
+    async function fetchNearest(lat, lng) {
+      const params = new URLSearchParams({ lat, lng });
+      const res = await fetch(`/api/buffer/gempa/nearest?${params}`);
+      if (!res.ok) throw new Error(res.statusText);
+      return res.json();
+    }
+
+    async function updateBuffers() {
+      const b = map.getBounds();
+      const params = new URLSearchParams({
+        minlng: b.getWest(), minlat: b.getSouth(),
+        maxlng: b.getEast(), maxlat: b.getNorth(),
+        tol: 0.0005
+      });
+      const res = await fetch(`/api/buffer/gempa?${params}`);
+      const data = await res.json();
+
+      // compute breaks & legend
+      const vals = data.features.map(f=>f.properties[currentField]).filter(v=>v!=null && !isNaN(v));
+      if(vals.length){
+        breaks = getJenksBreaks(vals, 6);
+        updateLegend();
+      }
+
+      // clear old layers
+      if(bufferLayer) map.removeLayer(bufferLayer);
+      if(centroidLayer) map.removeLayer(centroidLayer);
+
+      // draw buffers
+      bufferLayer = L.geoJSON(data, {
+        style: f => ({
+          fillColor: getColor(f.properties[currentField]),
+          weight: 1, color: 'white', fillOpacity: 0.7
+        })
+      }).addTo(map);
+
+      // attach click to buffer polygons
+      bufferLayer.eachLayer(layer => {
+        layer.on('click', async e => {
+          try {
+            const near = await fetchNearest(e.latlng.lat, e.latlng.lng);
+            const html = `
+                ${currentField}: ${near[currentField]}<br>
+                distance: ${near.distance_m.toFixed(1)} m
+            `;
+            layer.bindPopup(html).openPopup();
+          } catch (err) {
+            layer.bindPopup("Error fetching nearest").openPopup();
+            console.error(err);
+          }
+        });
+      });
+
+      // draw centroids matching buffer color
+      centroidLayer = L.layerGroup().addTo(map);
+      bufferLayer.eachLayer(layer => {
+        const center = layer.getBounds().getCenter();
+        const val = layer.feature.properties[currentField];
+        const c = getColor(val);
+        L.circleMarker(center, {
+          radius: 5, color: c, fillColor: c, fillOpacity: 1, weight: 1
+        }).addTo(centroidLayer);
+      });
+    }
+
+    document.getElementById('fieldSelect').addEventListener('change', () => {
+      currentField = document.getElementById('fieldSelect').value;
+      updateBuffers();
+    });
+
+    map.whenReady(updateBuffers);
+    map.on('moveend', updateBuffers);
+  </script>
+</body>
+</html>

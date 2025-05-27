@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Visualisasi AAL per Provinsi</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <style>
+    body {
+      margin: 0;
+      font-family: sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 20px;
+      box-sizing: border-box;
+    }
+    #controls {
+      margin-bottom: 20px;
+    }
+    #controls label {
+      font-weight: bold;
+      margin-right: 8px;
+    }
+    canvas {
+      max-width: 800px;
+      width: 100%;
+      height: 300px;
+      margin-bottom: 40px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Dropdown pilih provinsi -->
+  <div id="controls">
+    <label for="provSelect">Pilih Provinsi:</label>
+    <select id="provSelect">
+      <option value="">— Pilih Provinsi —</option>
+    </select>
+  </div>
+
+  <!-- Total AAL -->
+  <canvas id="aalChart"></canvas>
+
+  <!-- AAL per Exposure Type -->
+  <canvas id="bmnChart"></canvas>
+  <canvas id="fsChart"></canvas>
+  <canvas id="fdChart"></canvas>
+
+  <script>
+    // helper format Rupiah
+    function formatRupiah(num) {
+      return num.toLocaleString('id-ID', {
+        style: 'currency',
+        currency: 'IDR',
+        minimumFractionDigits: 0
+      });
+    }
+
+    const provSelect = document.getElementById('provSelect');
+    const ctxTotal = document.getElementById('aalChart').getContext('2d');
+    const ctxBmn   = document.getElementById('bmnChart').getContext('2d');
+    const ctxFs    = document.getElementById('fsChart').getContext('2d');
+    const ctxFd    = document.getElementById('fdChart').getContext('2d');
+    let chartTotal, chartBmn, chartFs, chartFd;
+
+    // 1. isi dropdown
+    fetch('/api/aal-provinsi-list')
+      .then(r => r.ok ? r.json() : Promise.reject(r.status))
+      .then(list => {
+        list.forEach(nama => {
+          const o = document.createElement('option');
+          o.value = nama;
+          o.textContent = nama;
+          provSelect.appendChild(o);
+        });
+      })
+      .catch(err => console.error('Gagal load provinsi AAL:', err));
+
+    // labels sama untuk semua chart
+    const hazardLabels = [
+      'Gempa 500','Gempa 250','Gempa 100',
+      'Banjir 100','Banjir 50','Banjir 25',
+      'Longsor 2','Longsor 5',
+      'Gunung 250','Gunung 100','Gunung 50'
+    ];
+
+    // fungsi render chart total
+    function renderTotal(props) {
+      const data = [
+        props.aal_gempa_500_total,
+        props.aal_gempa_250_total,
+        props.aal_gempa_100_total,
+        props.aal_banjir_100_total,
+        props.aal_banjir_50_total,
+        props.aal_banjir_25_total,
+        props.aal_longsor_2_total,
+        props.aal_longsor_5_total,
+        props.aal_gunungberapi_250_total,
+        props.aal_gunungberapi_100_total,
+        props.aal_gunungberapi_50_total
+      ];
+      if (chartTotal) {
+        chartTotal.data.datasets[0].data = data;
+        chartTotal.update();
+      } else {
+        chartTotal = new Chart(ctxTotal, {
+          type: 'bar',
+          data: { labels: hazardLabels, datasets: [{ label:'Total AAL', data }]},
+          options: { scales:{ y:{ beginAtZero:true, ticks:{ callback:formatRupiah }}}, plugins:{ tooltip:{ callbacks:{ label:ctx=>formatRupiah(ctx.parsed.y)}}}}
+        });
+      }
+    }
+
+    // fungsi render exposure type
+    function renderByType(props) {
+      const dataBmn = [
+        props.aal_gempa_500_bmn,
+        props.aal_gempa_250_bmn,
+        props.aal_gempa_100_bmn,
+        props.aal_banjir_100_bmn,
+        props.aal_banjir_50_bmn,
+        props.aal_banjir_25_bmn,
+        props.aal_longsor_2_bmn,
+        props.aal_longsor_5_bmn,
+        props.aal_gunungberapi_250_bmn,
+        props.aal_gunungberapi_100_bmn,
+        props.aal_gunungberapi_50_bmn
+      ];
+      const dataFs = [
+        props.aal_gempa_500_fs,
+        props.aal_gempa_250_fs,
+        props.aal_gempa_100_fs,
+        props.aal_banjir_100_fs,
+        props.aal_banjir_50_fs,
+        props.aal_banjir_25_fs,
+        props.aal_longsor_2_fs,
+        props.aal_longsor_5_fs,
+        props.aal_gunungberapi_250_fs,
+        props.aal_gunungberapi_100_fs,
+        props.aal_gunungberapi_50_fs
+      ];
+      const dataFd = [
+        props.aal_gempa_500_fd,
+        props.aal_gempa_250_fd,
+        props.aal_gempa_100_fd,
+        props.aal_banjir_100_fd,
+        props.aal_banjir_50_fd,
+        props.aal_banjir_25_fd,
+        props.aal_longsor_2_fd,
+        props.aal_longsor_5_fd,
+        props.aal_gunungberapi_250_fd,
+        props.aal_gunungberapi_100_fd,
+        props.aal_gunungberapi_50_fd
+      ];
+
+      if (!chartBmn) {
+        chartBmn = new Chart(ctxBmn, { type:'bar', data:{ labels:hazardLabels, datasets:[{ label:'BMN', data:dataBmn }]}, options:{ scales:{ y:{ beginAtZero:true, ticks:{ callback:formatRupiah }}}, plugins:{ legend:{ position:'top'}, tooltip:{ callbacks:{ label:ctx=>formatRupiah(ctx.parsed.y)}}}} });
+      } else {
+        chartBmn.data.datasets[0].data = dataBmn;
+        chartBmn.update();
+      }
+
+      if (!chartFs) {
+        chartFs = new Chart(ctxFs, { type:'bar', data:{ labels:hazardLabels, datasets:[{ label:'FS', data:dataFs }]}, options:{ scales:{ y:{ beginAtZero:true, ticks:{ callback:formatRupiah }}}, plugins:{ legend:{ position:'top'}, tooltip:{ callbacks:{ label:ctx=>formatRupiah(ctx.parsed.y)}}}} });
+      } else {
+        chartFs.data.datasets[0].data = dataFs;
+        chartFs.update();
+      }
+
+      if (!chartFd) {
+        chartFd = new Chart(ctxFd, { type:'bar', data:{ labels:hazardLabels, datasets:[{ label:'FD', data:dataFd }]}, options:{ scales:{ y:{ beginAtZero:true, ticks:{ callback:formatRupiah }}}, plugins:{ legend:{ position:'top'}, tooltip:{ callbacks:{ label:ctx=>formatRupiah(ctx.parsed.y)}}}} });
+      } else {
+        chartFd.data.datasets[0].data = dataFd;
+        chartFd.update();
+      }
+    }
+
+    // 3. event change
+    provSelect.addEventListener('change',()=>{
+      const prov = provSelect.value;
+      if (!prov) return;
+      fetch(`/api/aal-provinsi-data?provinsi=${encodeURIComponent(prov)}`)
+        .then(r=>r.ok?r.json():Promise.reject(r.status))
+        .then(props=>{
+          if (!props) return;
+          renderTotal(props);
+          renderByType(props);
+        })
+        .catch(err=>console.error('Gagal load AAL-provinsi:',err));
+    });
+  </script>
+</body>
+</html>

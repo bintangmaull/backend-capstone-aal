@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Multi-Disaster Choropleth with Nearest-Point Popup</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <style>
+    body, html { margin:0; padding:0; height:100%; }
+    #map { width:100%; height:100%; }
+    .control-container {
+      position: absolute; top: 10px; left: 10px;
+      background: white; padding: 6px; border-radius: 4px;
+      box-shadow: 0 0 6px rgba(0,0,0,0.2); z-index:1000;
+      font-family: sans-serif; font-size: 14px;
+    }
+    .info.legend {
+      background: white; padding: 6px; line-height: 18px;
+      color: #333; box-shadow: 0 0 6px rgba(0,0,0,0.2);
+    }
+    .info.legend i {
+      width: 18px; height: 18px; float: left;
+      margin-right: 8px; opacity: 0.7;
+    }
+  </style>
+</head>
+<body>
+  <div class="control-container">
+    <label for="typeSelect">Pilih Bencana:</label><br>
+    <select id="typeSelect">
+      <option value="gempa">Gempa</option>
+      <option value="banjir">Banjir</option>
+      <option value="longsor">Longsor</option>
+      <option value="gunungberapi">Gunung Berapi</option>
+    </select><br><br>
+    <label for="fieldSelect">Pilih Intensitas:</label><br>
+    <select id="fieldSelect"></select>
+  </div>
+  <div id="map"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const TYPE_FIELDS = {
+      gempa: ["mmi_500","mmi_250","mmi_100"],
+      banjir: ["depth_100","depth_50","depth_25"],
+      longsor: ["mflux_5","mflux_2"],
+      gunungberapi: ["kpa_250","kpa_100","kpa_50"]
+    };
+
+    const map = L.map('map').setView([-6.2, 106.8], 9);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+
+    let bufferLayer, centroidLayer, legendControl;
+    const typeSel = document.getElementById('typeSelect'),
+          fieldSel = document.getElementById('fieldSelect');
+    let currentType = typeSel.value,
+        currentField = null;
+
+    function updateFields(){
+      fieldSel.innerHTML = "";
+      TYPE_FIELDS[currentType].forEach(f => {
+        const opt = document.createElement('option');
+        opt.value = f; opt.text = f;
+        fieldSel.add(opt);
+      });
+      currentField = fieldSel.value;
+    }
+    typeSel.addEventListener('change', () => {
+      currentType = typeSel.value;
+      updateFields();
+      updateBuffers(getTolerance(map.getZoom()));
+    });
+    fieldSel.addEventListener('change', () => {
+      currentField = fieldSel.value;
+      updateBuffers(getTolerance(map.getZoom()));
+    });
+    updateFields();
+
+    function getJenksBreaks(data, n) {
+      data.sort((a,b)=>a-b);
+      const lower = Array(data.length+1).fill().map(()=>Array(n+1).fill(0));
+      const variance = Array(data.length+1).fill().map(()=>Array(n+1).fill(Infinity));
+      for(let i=1;i<=n;i++){ lower[1][i]=1; variance[1][i]=0; }
+      for(let l=2;l<=data.length;l++){
+        let sum=0,sumSq=0,w=0;
+        for(let m=1;m<=l;m++){
+          const v=data[l-m]; sum+=v; sumSq+=v*v; w++;
+          const cost=sumSq - sum*sum/w;
+          const i4=l-m;
+          if(i4>0){
+            for(let j=2;j<=n;j++){
+              const c = cost + variance[i4][j-1];
+              if(variance[l][j] > c){
+                lower[l][j] = i4+1;
+                variance[l][j] = c;
+              }
+            }
+          }
+        }
+        variance[l][1] = sumSq - sum*sum/w;
+        lower[l][1] = 1;
+      }
+      const breaks = Array(n+1).fill(0);
+      breaks[n] = data[data.length-1];
+      breaks[0] = data[0];
+      let k = data.length, count=n;
+      while(count>1){
+        const idx = lower[k][count] - 2;
+        breaks[count-1] = data[idx];
+        k = lower[k][count] - 1;
+        count--;
+      }
+      return breaks;
+    }
+
+    const colorScale = ['#FFEDA0','#FED976','#FD8D3C','#FC4E2A','#E31A1C','#BD0026'],
+          nullColor = '#CCCCCC';
+    let breaks = [];
+    function getColor(v) {
+      if(v==null||isNaN(v)) return nullColor;
+      for(let i=breaks.length-1;i>0;i--){
+        if(v>=breaks[i]) return colorScale[i-1];
+      }
+      return colorScale[0];
+    }
+
+    function updateLegend() {
+      if(legendControl) map.removeControl(legendControl);
+      legendControl = L.control({position:'bottomright'});
+      legendControl.onAdd = () => {
+        const div = L.DomUtil.create('div','info legend');
+        for(let i=0;i<breaks.length-1;i++){
+          div.innerHTML += `<i style="background:${colorScale[i]}"></i> `
+                         + `${breaks[i].toFixed(2)} – ${breaks[i+1].toFixed(2)}<br>`;
+        }
+        div.innerHTML += `<i style="background:${nullColor}"></i> Null<br>`;
+        return div;
+      };
+      legendControl.addTo(map);
+    }
+
+    function getTolerance(zoom) {
+      return zoom < 6  ? 0.01  :
+             zoom < 10 ? 0.001 :
+                         0.0001;
+    }
+
+    async function fetchBuffers(params){
+      const res = await fetch(`/api/buffer/${currentType}?${params}`);
+      return res.json();
+    }
+
+    async function updateBuffers(tol){
+      const b = map.getBounds();
+      const params = new URLSearchParams({
+        minlng: b.getWest(), minlat: b.getSouth(),
+        maxlng: b.getEast(), maxlat: b.getNorth(),
+        tol: tol,
+        field: currentField
+      });
+      const data = await fetchBuffers(params);
+
+      data.features = data.features.filter(f => f.properties[currentField] != null);
+      const vals = data.features.map(f=>f.properties[currentField]);
+      if(vals.length){
+        breaks = getJenksBreaks(vals, 6);
+        updateLegend();
+      }
+
+      if(bufferLayer) map.removeLayer(bufferLayer);
+      if(centroidLayer) map.removeLayer(centroidLayer);
+
+      // 1) Gambar polygon tanpa border dan dengan opacity
+      bufferLayer = L.geoJSON(data, {
+        renderer: L.canvas(),
+        style: feature => ({
+          fillColor: getColor(feature.properties[currentField]),
+          stroke: false,
+          fillOpacity: 0.5
+        })
+      }).addTo(map);
+
+      // 2) Buat layerGroup untuk semua centroid
+      centroidLayer = L.layerGroup();
+      bufferLayer.eachLayer(layer => {
+        const c = layer.getBounds().getCenter();
+        const v = layer.feature.properties[currentField];
+        const col = getColor(v);
+        const marker = L.circleMarker(c, {
+          radius: 5,
+          stroke: false,
+          fillColor: col,
+          fillOpacity: 1
+        });
+        // simpan intensitas di options
+        marker.options.value = v;
+        centroidLayer.addLayer(marker);
+      });
+      centroidLayer.addTo(map);
+    }
+
+    // 3) Tangani klik peta — cari centroid terdekat
+    map.on('click', e => {
+      let nearest = null;
+      let minDist = Infinity;
+
+      centroidLayer.eachLayer(marker => {
+        const d = map.distance(e.latlng, marker.getLatLng());
+        if (d < minDist) {
+          minDist = d;
+          nearest = marker;
+        }
+      });
+
+      if (nearest) {
+        L.popup({ offset: [0, -10] })
+          // sekarang popup muncul tepat di titik sumber marker
+          .setLatLng(nearest.getLatLng())
+          .setContent(
+            `${currentField}: ${nearest.options.value}<br>` +
+            `distance: ${minDist.toFixed(1)} m`
+          )
+          .openOn(map);
+      }
+    });
+
+    map.whenReady(() => updateBuffers(getTolerance(map.getZoom())));
+    map.on('moveend', () => updateBuffers(getTolerance(map.getZoom())));
+  </script>
+</body>
+</html>

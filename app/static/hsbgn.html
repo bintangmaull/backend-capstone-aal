@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <title>Manajemen HSBGN</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body { margin:0; padding:0; font-family: Arial, sans-serif; background: #FFE5E5; }
+    .container { max-width: 900px; margin: 20px auto; background: #FFF0F0; padding: 20px; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
+    .header { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    .filter { display: flex; flex-direction: column; }
+    .filter label { font-weight: bold; font-size: 14px; margin-bottom: 4px; }
+    .filter select, .filter input[type="text"] { padding: 6px; border:1px solid #ccc; border-radius:4px; font-size:14px; }
+    .btn { background:#A50021; color:white; border:none; padding:8px 12px; border-radius:4px; cursor:pointer; font-size:14px; }
+    table { width:100%; border-collapse: collapse; margin-top:16px; background: white; border-radius: 4px; overflow: hidden; }
+    thead { background:#A50021; color:white; }
+    th, td { padding:8px; text-align:left; border-bottom:1px solid #ddd; font-size:14px; }
+    tbody tr:hover { background:#ffecec; }
+    .actions button { background:none; border:none; cursor:pointer; margin-right:8px; font-size:16px; color:#A50021; }
+    .modal-backdrop { position: fixed; top:0; left:0; right:0; bottom:0; background: rgba(0,0,0,0.5); display: none; justify-content:center; align-items:center; z-index:1000; }
+    .modal { background:white; padding:20px; border-radius:8px; width:300px; box-shadow:0 2px 8px rgba(0,0,0,0.2); }
+    .modal h2 { margin-top:0; }
+    .modal form { display:flex; flex-direction:column; gap:8px; }
+    .modal form input { padding:6px; border:1px solid #ccc; border-radius:4px; font-size:14px; }
+    .btn-group { margin-top:12px; text-align:right; display:flex; gap:8px; }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <div class="header">
+      <div class="filter">
+        <label for="provFilter">Provinsi</label>
+        <select id="provFilter">
+          <option value="">— Semua Provinsi —</option>
+        </select>
+      </div>
+      <div class="filter">
+        <label for="searchInput">Cari Kota</label>
+        <input id="searchInput" type="text" placeholder="ketik untuk cari...">
+      </div>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Kota</th><th>Provinsi</th><th>Nilai HSBGN</th><th>Aksi</th>
+        </tr>
+      </thead>
+      <tbody id="tableBody"></tbody>
+    </table>
+  </div>
+
+  <div id="backdrop" class="modal-backdrop">
+    <div class="modal">
+      <h2>Edit Nilai HSBGN</h2>
+      <form id="hsbgnForm">
+        <input type="hidden" id="editId">
+        <label>Nilai HSBGN:</label>
+        <input type="text" id="hsbgn" required>
+        <div class="btn-group">
+          <button type="button" id="cancelBtn" class="btn">Batal</button>
+          <button type="submit" class="btn">Simpan</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    const apiBase       = '/api/hsbgn';
+    const provApi       = '/api/provinsi';
+
+    const provFilter    = document.getElementById('provFilter');
+    const searchInput   = document.getElementById('searchInput');
+    const tableBody     = document.getElementById('tableBody');
+    const backdrop      = document.getElementById('backdrop');
+    const form          = document.getElementById('hsbgnForm');
+    const editIdFld     = document.getElementById('editId');
+    const hsbgnInput    = document.getElementById('hsbgn');
+    const cancelBtn     = document.getElementById('cancelBtn');
+
+    let allData = [];
+
+    document.addEventListener('DOMContentLoaded', () => {
+      loadProvinsi(provFilter);
+      loadHSBGN();
+      hsbgnInput.addEventListener('input', () => {
+        let v = hsbgnInput.value.replace(/\D/g, '');
+        hsbgnInput.value = v ? v.replace(/\B(?=(\d{3})+(?!\d))/g, '.') : '';
+      });
+    });
+
+    provFilter.addEventListener('change', renderTable);
+    searchInput.addEventListener('input', renderTable);
+
+    async function loadHSBGN() {
+      const res = await fetch(apiBase);
+      allData = await res.json();
+      renderTable();
+    }
+
+    function renderTable() {
+      const provVal = provFilter.value.toLowerCase();
+      const searchVal = searchInput.value.toLowerCase();
+      const filtered = allData.filter(item =>
+        (!provVal || item.provinsi.toLowerCase() === provVal) &&
+        (!searchVal || item.kota.toLowerCase().includes(searchVal))
+      );
+      tableBody.innerHTML = filtered.map(r => {
+        const formatted = 'Rp ' + Number(r.hsbgn).toLocaleString('id-ID');
+        return `
+        <tr>
+          <td>${r.kota}</td><td>${r.provinsi}</td><td>${formatted}</td>
+          <td class="actions">
+            <button onclick="openModal('${r.id_kota}')">✏️</button>
+          </td>
+        </tr>`;
+      }).join('');
+    }
+
+    function openModal(prefixedId) {
+      // simpan full id_kota string
+      editIdFld.value = prefixedId;
+      const item = allData.find(d => d.id_kota === prefixedId);
+      hsbgnInput.value = String(item.hsbgn).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+      backdrop.style.display = 'flex';
+    }
+
+    cancelBtn.onclick = () => backdrop.style.display = 'none';
+
+    form.onsubmit = async e => {
+      e.preventDefault();
+      const id = editIdFld.value;              // now 'Kota_8'
+      const raw = hsbgnInput.value.replace(/\./g, '');
+      const payload = { hsbgn: parseFloat(raw) };
+      const res = await fetch(`${apiBase}/${id}`, {
+        method: 'PUT', headers: { 'Content-Type':'application/json' }, body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        backdrop.style.display = 'none';
+        loadHSBGN();
+      } else alert('Gagal update');
+    };
+
+    async function loadProvinsi(sel) {
+      const res = await fetch(provApi);
+      const list = await res.json();
+      sel.innerHTML = '<option value="">— Semua Provinsi —</option>';
+      list.forEach(p => sel.innerHTML += `<option value="${p}">${p}</option>`);
+    }
+  </script>
+</body>
+</html>

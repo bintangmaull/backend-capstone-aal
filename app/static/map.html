@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Peta Gedung + Filter & Search + Zoom + Layer Control</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <!-- Leaflet CSS -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  />
+
+  <style>
+    body { margin:0; }
+    #filter-container {
+      position:absolute; top:10px; left:10px; z-index:1000;
+      background:white; padding:8px; border-radius:6px;
+      box-shadow:0 2px 6px rgba(0,0,0,0.2);
+      display:flex; gap:12px; align-items:center;
+    }
+    #typeFilters label {
+      font-size:14px; margin-right:8px; cursor:pointer;
+    }
+    .search-container {
+      position:absolute; top:80px; left:10px; z-index:1000;
+      background:white; padding:8px; border-radius:8px;
+      box-shadow:0 2px 6px rgba(0,0,0,0.15);
+      width:300px;
+    }
+    .search-container input {
+      width:100%; padding:8px; font-size:14px;
+      border:1px solid #ccc; border-radius:5px;
+      box-sizing:border-box;
+    }
+    .search-results {
+      max-height:200px; overflow-y:auto; margin-top:4px;
+    }
+    .search-results div {
+      padding:6px; cursor:pointer; border-bottom:1px solid #eee;
+    }
+    .search-results div:hover { background:#f0f0f0; }
+    #map { height:100vh; width:100%; }
+    .leaflet-tooltip.building-label {
+      background: transparent; border:none; box-shadow:none;
+      color:#333; font-weight:bold; font-size:14px; white-space:nowrap;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- FILTER: provinsi / kota / tipe -->
+  <div id="filter-container">
+    <select id="provinsiSelect">
+      <option value="">— Pilih Provinsi —</option>
+    </select>
+    <select id="kotaSelect" disabled>
+      <option value="">— Pilih Kota —</option>
+    </select>
+    <div id="typeFilters">
+      <label><input type="checkbox" id="bmnFilter" value="BMN" checked> BMN</label>
+      <label><input type="checkbox" id="fsFilter"  value="FS"  checked> FS</label>
+      <label><input type="checkbox" id="fdFilter"  value="FD"  checked> FD</label>
+    </div>
+  </div>
+
+  <!-- SEARCH & PREVIEW -->
+  <div class="search-container">
+    <input type="text" id="search" placeholder="Cari nama gedung..." />
+    <div class="search-results" id="results"></div>
+    <div id="zoom-controls"></div>
+  </div>
+
+  <div id="map"></div>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <script>
+    // format Rupiah
+    function formatRupiah(num) {
+      return num.toLocaleString('id-ID',{
+        style:'currency',currency:'IDR',minimumFractionDigits:0
+      });
+    }
+
+    // 1) Inisialisasi peta
+    const map = L.map("map", { zoomControl:false }).setView([-8.9,116.4],10);
+    const osm = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+      { attribution:"&copy; OSM" }
+    ).addTo(map);
+    const googleStreets = L.tileLayer(
+      "https://{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}",
+      { subdomains:["mt0","mt1","mt2","mt3"] }
+    );
+    const googleSat = L.tileLayer(
+      "https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
+      { subdomains:["mt0","mt1","mt2","mt3"] }
+    );
+
+    // 2) Layer untuk marker
+    const markerGroup = L.layerGroup().addTo(map);
+
+    // 3) Elemen DOM
+    const provSelect  = document.getElementById('provinsiSelect');
+    const kotaSelect  = document.getElementById('kotaSelect');
+    const searchInput = document.getElementById("search");
+    const resultsBox  = document.getElementById("results");
+    const bmnFilter   = document.getElementById("bmnFilter");
+    const fsFilter    = document.getElementById("fsFilter");
+    const fdFilter    = document.getElementById("fdFilter");
+
+    // 4) Icon kecil berwarna per tipe (12×20 px)
+    const icons = {
+      BMN: L.icon({
+        iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png',
+        shadowUrl:'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+        iconSize:[12,20], iconAnchor:[6,20], popupAnchor:[0,-20], shadowSize:[20,20]
+      }),
+      FS: L.icon({
+        iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-green.png',
+        shadowUrl:'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+        iconSize:[12,20], iconAnchor:[6,20], popupAnchor:[0,-20], shadowSize:[20,20]
+      }),
+      FD: L.icon({
+        iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-blue.png',
+        shadowUrl:'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+        iconSize:[12,20], iconAnchor:[6,20], popupAnchor:[0,-20], shadowSize:[20,20]
+      })
+    };
+
+    let dataListGlobal = [];
+
+    // 5) Load provinsi
+    fetch("/api/provinsi")
+      .then(r=>r.ok? r.json(): Promise.reject(r.status))
+      .then(list=>{
+        list.forEach(p=>{
+          const o = document.createElement('option');
+          o.value = p; o.textContent = p;
+          provSelect.appendChild(o);
+        });
+      });
+
+    // 6) On prov change → load kota
+    provSelect.addEventListener('change', ()=>{
+      kotaSelect.innerHTML = '<option value="">— Pilih Kota —</option>';
+      kotaSelect.disabled   = !provSelect.value;
+      clearAll();
+      if (!provSelect.value) return;
+
+      fetch(`/api/kota?provinsi=${encodeURIComponent(provSelect.value)}`)
+        .then(r=>r.ok? r.json(): Promise.reject(r.status))
+        .then(list=>{
+          list.forEach(k=>{
+            const o = document.createElement('option');
+            o.value = k; o.textContent = k;
+            kotaSelect.appendChild(o);
+          });
+        });
+    });
+
+    // 7) On kota change → fetch, render gedung + auto-zoom
+    kotaSelect.addEventListener('change', ()=>{
+      clearAll();
+      if (!provSelect.value || !kotaSelect.value) return;
+
+      fetch(`/api/gedung?provinsi=${encodeURIComponent(provSelect.value)}&kota=${encodeURIComponent(kotaSelect.value)}`)
+        .then(r=>r.ok? r.json(): Promise.reject(r.status))
+        .then(gj=>{
+          // auto-zoom area kota
+          const latlngs = gj.features.map(f=>{
+            const [lon,lat] = f.geometry.coordinates;
+            return [lat,lon];
+          });
+          if (latlngs.length) {
+            map.fitBounds(L.latLngBounds(latlngs), { maxZoom:14 });
+          }
+
+          dataListGlobal = gj.features.map(f=>{
+            const p = f.properties;
+            const [lon,lat] = f.geometry.coordinates;
+            const type = (p.id_bangunan||"").split('_')[0] || '';
+            const popup = `
+              <b>${p.nama_gedung}</b><br/>
+              <i>${p.taxonomy}</i> | Luas: ${p.luas} m²<br/>
+              ${p.alamat}<br/>
+              <small>${p.kota}, ${p.provinsi}</small>
+              <hr style="margin:4px 0;border:none;border-top:1px solid #ccc;"/>
+              <b>Kerugian Gempa:</b><br/>
+              &nbsp;&nbsp;500-th: ${formatRupiah(p.direct_loss_gempa_500)}<br/>
+              &nbsp;&nbsp;250-th: ${formatRupiah(p.direct_loss_gempa_250)}<br/>
+              &nbsp;&nbsp;100-th: ${formatRupiah(p.direct_loss_gempa_100)}<br/>
+              <b>Kerugian Banjir:</b><br/>
+              &nbsp;&nbsp;100-th: ${formatRupiah(p.direct_loss_banjir_100)}<br/>
+              &nbsp;&nbsp;50-th: ${formatRupiah(p.direct_loss_banjir_50)}<br/>
+              &nbsp;&nbsp;25-th: ${formatRupiah(p.direct_loss_banjir_25)}<br/>
+              <b>Kerugian Longsor:</b><br/>
+              &nbsp;&nbsp;5-th: ${formatRupiah(p.direct_loss_longsor_5)}<br/>
+              &nbsp;&nbsp;2-th: ${formatRupiah(p.direct_loss_longsor_2)}<br/>
+              <b>Kerugian Gunung Berapi:</b><br/>
+              &nbsp;&nbsp;250-th: ${formatRupiah(p.direct_loss_gunungberapi_250)}<br/>
+              &nbsp;&nbsp;100-th: ${formatRupiah(p.direct_loss_gunungberapi_100)}<br/>
+              &nbsp;&nbsp;50-th: ${formatRupiah(p.direct_loss_gunungberapi_50)}
+            `;
+            const m = L.marker([lat,lon], { icon: icons[type]||icons.FD })
+              .bindPopup(popup)
+              .bindTooltip(p.nama_gedung, {
+                permanent: false, direction:'right', offset:[10,0],
+                className:'building-label'
+              });
+            return { nama:p.nama_gedung, type, marker:m };
+          });
+
+          function update(){
+            const q = searchInput.value.toLowerCase().trim();
+            const types = [];
+            if (bmnFilter.checked) types.push('BMN');
+            if (fsFilter.checked)  types.push('FS');
+            if (fdFilter.checked)  types.push('FD');
+
+            resultsBox.innerHTML = '';
+            markerGroup.clearLayers();
+
+            dataListGlobal.forEach(item=>{
+              if (
+                item.nama.toLowerCase().includes(q) &&
+                (types.length===0 || types.includes(item.type))
+              ) {
+                markerGroup.addLayer(item.marker);
+                const div = document.createElement('div');
+                div.textContent = item.nama;
+                div.onclick = ()=>{
+                  map.setView(item.marker.getLatLng(),18);
+                  item.marker.openPopup();
+                };
+                resultsBox.appendChild(div);
+              }
+            });
+
+            const b = markerGroup.getBounds();
+            if (b.isValid()) {
+              map.fitBounds(b, { maxZoom:14 });
+            }
+            const z = map.getZoom();
+            dataListGlobal.forEach(item=>{
+              if (z >= 15) item.marker.openTooltip();
+              else          item.marker.closeTooltip();
+            });
+          }
+
+          searchInput.oninput = update;
+          bmnFilter.onchange  = update;
+          fsFilter.onchange   = update;
+          fdFilter.onchange   = update;
+
+          update();
+        })
+        .catch(console.error);
+    });
+
+    // 8) custom zoom & layer control
+    L.control.zoom({position:'topright'}).addTo(map);
+    document.getElementById('zoom-controls')
+      .appendChild(document.querySelector('.leaflet-control-zoom'));
+    L.control.layers(
+      { "OSM": osm, "Google St": googleStreets, "Google Sat": googleSat },
+      { "Gedung": markerGroup }
+    ).addTo(map);
+
+    function clearAll(){
+      markerGroup.clearLayers();
+      resultsBox.innerHTML = '';
+      searchInput.value = '';
+    }
+  </script>
+</body>
+</html>

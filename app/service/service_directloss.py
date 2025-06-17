@@ -104,15 +104,16 @@ def process_all_disasters():
                 logger.debug(f"{col} sample: {bld[col].head(3).tolist()}")
         else:
             for s in scales:
-                ycols = [
-                    f"nilai_y_cr_{pre}{s}",
-                    f"nilai_y_mcf_{pre}{s}",
-                    f"nilai_y_mur_{pre}{s}",
-                    f"nilai_y_lightwood_{pre}{s}"
-                ]
-                maxv = df_raw[ycols].to_numpy().max(axis=1)
+                # Mengambil kolom berdasarkan return period dan skala untuk gempa, longsor, dan gunung berapi
+                damage_ratio_col = f"nilai_y_cr_{pre}{s}"  # Misalnya untuk gempa pada skala tertentu
+                if name == "longsor":
+                    damage_ratio_col = f"nilai_y_mur_{pre}{s}"  # Sesuaikan dengan longsor
+                elif name == "gunungberapi":
+                    damage_ratio_col = f"nilai_y_lightwood_{pre}{s}"  # Sesuaikan dengan gunung berapi
+
+                damage_ratio = df_raw[damage_ratio_col].to_numpy()
                 col = f"direct_loss_{name}_{s}"
-                bld[col] = luas * hsbgn * maxv
+                bld[col] = luas * hsbgn * damage_ratio
                 bld[col] = bld[col].fillna(0)
                 logger.debug(f"{col} sample: {bld[col].head(3).tolist()}")
 
@@ -227,7 +228,6 @@ def recalc_building_directloss_and_aal(bangunan_id: str):
 
         geom       = b["geom"]
         luas_val   = b["luas"]
-        # ambil nilai asli
         hsbgn_val_raw = b["hsbgn"]
         raw_floors    = int(b["jumlah_lantai"])
 
@@ -251,7 +251,6 @@ def recalc_building_directloss_and_aal(bangunan_id: str):
         # hitung adjusted hsbgn
         hsbgn_val = hsbgn_val_raw * coeff_map.get(floor_hsbgn, 1.0)
 
-        
         prov       = b["provinsi"]
         kode_bgn   = b["kode_bangunan"]
 
@@ -353,11 +352,14 @@ def recalc_building_directloss_and_aal(bangunan_id: str):
                     y2 = near.get(f"nilai_y_2_{pre}{s}", 0)
                     v  = y1 if floor_banjir == 1 else y2
                 else:
-                    ycols = [f"nilai_y_cr_{pre}{s}",
-                             f"nilai_y_mcf_{pre}{s}",
-                             f"nilai_y_mur_{pre}{s}",
-                             f"nilai_y_lightwood_{pre}{s}"]
-                    v = max(near.get(c, 0) for c in ycols)
+                    # Sesuaikan perhitungan dengan return period
+                    damage_ratio_col = f"nilai_y_cr_{pre}{s}"  # Misalnya untuk gempa pada skala tertentu
+                    if nama == "longsor":
+                        damage_ratio_col = f"nilai_y_mur_{pre}{s}"  # Sesuaikan dengan longsor
+                    elif nama == "gunungberapi":
+                        damage_ratio_col = f"nilai_y_lightwood_{pre}{s}"  # Sesuaikan dengan gunung berapi
+                    v = near.get(damage_ratio_col, 0)
+
                 if v is None or (isinstance(v, float) and math.isnan(v)):
                     v = 0.0
                 direct_losses[dlc] = float(luas_val * hsbgn_val * v)
@@ -407,4 +409,3 @@ def recalc_building_directloss_and_aal(bangunan_id: str):
     logger.debug(f"=== END incremental recalc for {bangunan_id} ===")
 
     return {"direct_losses": direct_losses}
-

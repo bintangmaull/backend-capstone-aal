@@ -154,10 +154,10 @@ def calculate_aal():
     df = pd.read_csv(path, delimiter=';').fillna(0)
 
     periods = {
-      "gempa_500":0.02, "gempa_250":0.04, "gempa_100":0.10,
-      "banjir_100":0.05,"banjir_50":0.10,"banjir_25":0.20,
-      "gunungberapi_250":0.01,"gunungberapi_100":0.03,"gunungberapi_50":0.05,
-      "longsor_5":0.02,"longsor_2":0.04
+      "gempa_500":0.002, "gempa_250":0.004, "gempa_100":0.010,
+      "banjir_100":0.01,"banjir_50":0.02,"banjir_25":0.04,
+      "gunungberapi_250":0.004,"gunungberapi_100":0.01,"gunungberapi_50":0.02,
+      "longsor_5":0.2,"longsor_2":0.5
     }
 
     dl_cols = [c for c in df.columns if c.startswith("direct_loss_")]
@@ -377,10 +377,10 @@ def recalc_building_directloss_and_aal(bangunan_id: str):
     logger.debug(f"✅ DirectLoss updated for {bangunan_id}")
 
     periods = {
-      "gempa_500":0.02, "gempa_250":0.04, "gempa_100":0.10,
-      "banjir_100":0.05,"banjir_50":0.10,"banjir_25":0.20,
-      "gunungberapi_250":0.01,"gunungberapi_100":0.03,"gunungberapi_50":0.05,
-      "longsor_5":0.02,"longsor_2":0.04
+      "gempa_500":0.002, "gempa_250":0.004, "gempa_100":0.010,
+      "banjir_100":0.01,"banjir_50":0.02,"banjir_25":0.04,
+      "gunungberapi_250":0.004,"gunungberapi_100":0.01,"gunungberapi_50":0.02,
+      "longsor_5":0.2,"longsor_2":0.5
     }
 
     aal_row = db.session.query(HasilAALProvinsi).filter_by(provinsi=prov).one_or_none()

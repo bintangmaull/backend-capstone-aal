@@ -169,7 +169,7 @@ def calculate_aal():
         dis, sc = key.split("_")
         dlc = f"direct_loss_{dis}_{sc}"
         aalc = f"aal_{dis}_{sc}"
-        aal[aalc] = grp[dlc] * (-np.log(1-p))
+        aal[aalc] = grp[dlc] * p
     aal.reset_index(inplace=True)
     aal = aal.fillna(0)
     logger.debug(f"AAL before pivot: {aal.shape}")
@@ -391,7 +391,7 @@ def recalc_building_directloss_and_aal(bangunan_id: str):
         dis, sc = key.split("_")
         dlc = f"direct_loss_{dis}_{sc}"
         delta = direct_losses[dlc] - old_vals.get(dlc, 0)
-        delta_aal = float(delta * (-math.log(1 - p)))
+        delta_aal = float(delta * p)
         col_tax = f"aal_{dis}_{sc}_{kode_bgn}"
         col_tot = f"aal_{dis}_{sc}_total"
         # update atribut objek dan juga via UPDATE

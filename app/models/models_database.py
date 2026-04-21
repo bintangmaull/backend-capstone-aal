@@ -467,6 +467,18 @@ class ActivityLog(db.Model):
     detail      = db.Column(db.Text, nullable=True)
     timestamp   = db.Column(db.DateTime, server_default=db.func.now())
 
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'user_nama': self.user_nama,
+            'user_email': self.user_email,
+            'action': self.action,
+            'target': self.target,
+            'target_id': self.target_id,
+            'detail': self.detail,
+            'timestamp': self.timestamp.isoformat() if self.timestamp else None,
+        }
+
 class LossRatioGempa(db.Model):
     __tablename__ = 'loss_ratio_gempa'
 
@@ -573,3 +585,69 @@ class AALFloodSawahSkema2(db.Model):
 
     def to_dict(self):
         return {col.name: getattr(self, col.name) for col in self.__table__.columns}
+<<<<<<< HEAD
+=======
+
+
+class AALFloodBuilding(db.Model):
+    """Flood (Banjir) building AAL and PML values from CSV, per exposure/kota/CC scenario (Skema 1)."""
+    __tablename__ = 'aal_flood_building'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    exposure = db.Column(db.String(100), nullable=False)
+    climate_change = db.Column(db.String(100), nullable=False)
+    id_kota = db.Column(db.String(100), nullable=False)
+    cv = db.Column(db.Float)
+    aal = db.Column(db.Float)
+    var_95 = db.Column(db.Float)
+    tvar_95 = db.Column(db.Float)
+    var_99 = db.Column(db.Float)
+    tvar_99 = db.Column(db.Float)
+    pml_25 = db.Column(db.Float)
+    pml_50 = db.Column(db.Float)
+    pml_100 = db.Column(db.Float)
+    pml_250 = db.Column(db.Float)
+
+    def to_dict(self):
+        return {col.name: getattr(self, col.name) for col in self.__table__.columns}
+
+class AALFloodBuildingSkema2(db.Model):
+    """Flood (Banjir) building AAL and PML values for Skema 2 (7 Return Periods)."""
+    __tablename__ = 'aal_flood_building_skema2'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    exposure = db.Column(db.String(100), nullable=False)
+    climate_change = db.Column(db.String(100), nullable=False)
+    kota = db.Column(db.String(100), nullable=False)
+    aal = db.Column(db.Float, default=0)
+    pml_2 = db.Column(db.Float, default=0)
+    pml_5 = db.Column(db.Float, default=0)
+    pml_10 = db.Column(db.Float, default=0)
+    pml_25 = db.Column(db.Float, default=0)
+    pml_50 = db.Column(db.Float, default=0)
+    pml_100 = db.Column(db.Float, default=0)
+    pml_250 = db.Column(db.Float, default=0)
+
+    def to_dict(self):
+        return {col.name: getattr(self, col.name) for col in self.__table__.columns}
+
+class TsunamiRiskResults(db.Model):
+    """Tsunami risk metrics from CSV (VaR, TVaR)."""
+    __tablename__ = 'tsunami_risk_results'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    kota = db.Column(db.String(100), nullable=False)
+    exposure = db.Column(db.String(100), nullable=False)
+    aal = db.Column(db.Float, default=0)
+    actual_cv = db.Column(db.Float)
+    var_90 = db.Column(db.Float)
+    tvar_90 = db.Column(db.Float)
+    var_95 = db.Column(db.Float)
+    tvar_95 = db.Column(db.Float)
+    var_98 = db.Column(db.Float)
+    tvar_98 = db.Column(db.Float)
+    var_99 = db.Column(db.Float)
+    tvar_99 = db.Column(db.Float)
+    var_995 = db.Column(db.Float)
+    tvar_995 = db.Column(db.Float)
+
+    def to_dict(self):
+        return {col.name: getattr(self, col.name) for col in self.__table__.columns}
+>>>>>>> 30ae406 (Fix ActivityLog 500 error: added missing to_dict method)
